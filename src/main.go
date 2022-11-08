@@ -2,134 +2,9 @@ package main
 
 import (
 "fmt"
-//"os"
+"os"
 )
 
-var _debug int = 3
-
-func main() {
-    fmt.Printf("Hello, world!\n")
-
-    debug("testing one two three",false)
-    error("testing one two three",false)
-    info("testing one two three",true)
-
-    fmt.Println("TEST")
-
-    //os.Args 
-
-   // ..fmt.Printf("arg 0 = %s\n", $0)
-    
-}
-
-func get_debug() int { 
-   return _debug; 
-}
-
-func debug(data string, bold_me bool) { 
-    yellow := "33"
-    debug_writer(data, yellow, bold_me, "DEBUG:", 2) 
-}
-func error(data string, bold_me bool) { 
-    red := "31"
-    debug_writer(data, red, bold_me, "ERROR:", 1)
-}
-func info(data string, bold_me bool) { 
-    blue := "34"
-    debug_writer(data, blue, bold_me, "INFO:",3) 
-}
-
-func debug_writer(data string, color string, bold_me bool, prefix string, level int ) {
-
-    var bold string 
-    if bold_me == true { 
-        bold = "1" 
-    } else { 
-        bold = "" 
-    }
-
-    if get_debug() >= level {
-        fmt.Printf("\033[%s;%sm%s: %s  \033[0m\n", bold,  color, prefix,  data)
-    }
- }
-
-// 
-// 
-// def splash(version)# {{{
-// puts <<HERE
-// 
-//        &&& &&  & &&
-//       && &\/&\|& ()|/ @, &&
-//       &\/(/&/&||/& /_/)_&/_&
-//    &() &\/&|()|/&\/ '%" & ()
-//   &_\_&&_\ |& |&&/&__%_/_& &&
-// &&   && & &| &| /& & % ()& /&&
-//  ()&_---()&\&\|&&-&&--%---()~
-//      &&     \|||
-//              |||               mapcopy.rb XML Tree Spec File copier. 
-//              |||               for Ruby Version 3.x
-//              |||               Version: #{version}
-//        , -=-~  .-^- _ 
-// 
-// HERE
-// end# }}}
-// 
-// def show_version()# {{{
-//     puts "Version #{$VERSION}"
-// end # }}}
-// 
-// def show_help()# {{{
-//     puts <<ZZZ
-// 
-// SYNOPSIS
-//     mapcopy.rb OPTIONS 
-// 
-// DESCRIPTION
-//     copies via rsync calls all of the listed /etc, config, other files 
-//     with their proper file mode (mode/user/group) to the target dirs referenced 
-//     in the XML Tree Specification files. 
-//     
-//     OPTIONS
-//         -h, --help 
-//         show this help area. 
-// 
-//         -d, --dry-run 
-//         prefix the critical rm -rf, rsync calls with either "echo " or use their own dry-run flag 
-//         to avoid doing a real operation that will delete or move or change files etc. 
-// 
-//         -m, --mode {LIVE|DEV|TEST} ...or other 
-//         tell the script what to do in certain events/operations. 
-//         currently not actually in use -only originally the dry-run option was flagged when NOT 'live' 
-// 
-//         -f, --force-yes 
-//         when stdin is asking for a y/n question force a 'y' to continue without user interaction
-// 
-//         -l, --log-level {debug|error|other}
-//         output extra debug 'puts' lines when needed ...like Rust's logging. 
-// 
-//         -b, --bypass-null 
-//         allow a target prefix of 'NULL', normally meaning it was the Development machine 
-//         Warning: allowed to run on a live production machine, would copy over Development settings 
-//         to the live working directories!
-// 
-//         Last Edited: Mon 07 Nov 2022 20:50:15
-// 
-// ZZZ
-// 
-// end# }}}
-//
-//
-
-
-
-
-
-
-
-
-
-
-// !/usr/bin/env ruby
 // 
 // #############################################################################################################
 // # part 1. 
@@ -162,37 +37,197 @@ func debug_writer(data string, color string, bold_me bool, prefix string, level 
 // #        - handle rsync stdout response 
 // #        - OO ? wrap in a class? 
 // ###############################################################################################################
-// 
-// #----------------Gems--------------------------
-// #...this doesnt work
-// #install_gem_or_fail("xmlsimple")
-// #install_gem_or_fail("etc")
-// 
-// require "xmlsimple"
-// require "etc" 
-// #----------------------------------------------
-// 
-// def install_gem_or_fail(gem_name) # {{{
-//     if gem_installed?(gem_name) == false then 
-//         puts "#{gem_name} gem is required!"
-//         exit 1
-//     else 
-//         require gem_name
-//     end
-// end# }}}
-// 
-// def gem_installed?(gem_name)# {{{
-//     begin
-//         found_gem = Gem::Specification.find_by_name(gem_name)
-//         found_gem = Gem::Specification.find_by_path 
-//         return found_gem
-//     rescue Gem::LoadError
-//         return false
-//     end
-// end # }}}
-// 
-// 
-// #
+
+var _debug int = 3
+var _version string = "0.0.1" 
+
+func main() {
+    fmt.Printf("Hello, world!\n")
+
+    Debugln("testing one two three",false)
+    Errorln("testing one two three",false)
+    Infoln("testing one two three",true)
+
+    splash(_version) 
+    show_version()
+    show_help()
+
+    var terminate, dry_run, force_yes, run_mode, bypass_target_null, debug = set_args() 
+
+    Infoln(fmt.Sprintf("terminate: %v", terminate),false)
+    Infoln(fmt.Sprintf("dry_run: %v", dry_run),false)
+    Infoln(fmt.Sprintf("force_yes: %v", force_yes),false)
+    Infoln(fmt.Sprintf("run_mode: %v", run_mode),false)
+    Infoln(fmt.Sprintf("bypass_target_null: %v", bypass_target_null),false)
+    Infoln(fmt.Sprintf("debug: %v", debug),false)
+
+
+    
+}
+
+func get_log_level(level string) int {
+    debug :=0 
+    switch level {
+        case "error":
+            debug = 1
+
+        case "debug":
+            debug = 2
+
+        case "info" :
+            debug = 3 
+
+        default:
+            debug = 0 
+    }
+  
+    return debug
+} 
+
+func set_args() ( bool, bool, bool, string, bool, int ) {
+// when terminate < 0 the handler NEEDS to kill this process!!!!!
+// - shift will pop first element and move the whole array to the left. 
+    args := os.Args
+
+    //return set 
+    terminate := false
+    dry_run := false
+    force_yes := false 
+    run_mode := "" 
+    bypass_target_null := false 
+    debug := 0 
+
+    for ; len(args) > 0 ;  {
+        
+        arg := args[0] 
+        //doesnt kick in until log_level set anyways...
+        //debug( "set_args: ind0: '#{arg}' " )
+        switch arg {
+            case "--dry-run", "-d":
+                dry_run = true
+            case "--force-yes","-f":
+              force_yes = true
+            case "--mode","-m":
+              run_mode = args[1] 
+              case "--help","-h" : 
+              show_help() 
+              terminate = true
+              case "--version", "-v" : 
+              show_version()
+              terminate = true
+              case "--log-level", "-l" : 
+              debug = get_log_level(args[1]) 
+              case "--bypass-null", "-b" : 
+              bypass_target_null = true
+          } 
+        args = args[1:]
+        //shift(args)
+    }
+
+    return terminate, dry_run, force_yes, run_mode, bypass_target_null, debug
+}
+
+func get_debug() int { 
+   return _debug
+}
+
+func Debugln(data string, bold_me bool) { 
+    yellow := "33"
+    debug_writer(data, yellow, bold_me, "DEBUG:", 2) 
+}
+
+func Errorln(data string, bold_me bool) { 
+    // 'error' is a resevered interface word. 
+    red := "31"
+    debug_writer(data, red, bold_me, "ERROR:", 1)
+}
+
+func Infoln(data string, bold_me bool) { 
+    blue := "34"
+    debug_writer(data, blue, bold_me, "INFO:",3) 
+}
+
+func debug_writer(data string, color string, bold_me bool, prefix string, level int ) {
+
+    var bold string 
+    if bold_me == true { 
+        bold = "1" 
+    } else { 
+        bold = "" 
+    }
+
+    if get_debug() >= level {
+        fmt.Printf("\033[%s;%sm%s: %s  \033[0m\n", bold,  color, prefix,  data)
+    }
+}
+
+func splash(version string) { 
+
+    fmt.Printf(`
+
+        &&& &&  & &&
+       && &\/&\|& ()|/ @, &&
+       &\/(/&/&||/& /_/)_&/_&
+    &() &\/&|()|/&\/ '%%" & ()
+   &_\_&&_\ |& |&&/&__%%_/_& &&
+ &&   && & &| &| /& & %% ()& /&&
+  ()&_---()&\&\|&&-&&--%%---()~
+      &&     \|||
+              |||               mapcopy XML Tree Spec File copier. 
+              |||               Go Version 1.x
+              |||               Version: %s
+        , -=-~  .-^- _ 
+ 
+        %s`, version, "\n")
+
+}
+
+
+
+func show_version() {
+    fmt.Println("Version " + _version) 
+}
+
+func show_help() {
+    fmt.Printf(`
+
+SYNOPSIS
+    mapcopy.go OPTIONS 
+
+DESCRIPTION
+    copies via rsync calls all of the listed /etc, config, other files 
+    with their proper file mode (mode/user/group) to the target dirs referenced 
+    in the XML Tree Specification files. 
+    
+    OPTIONS
+        -h, --help 
+        show this help area. 
+
+        -d, --dry-run 
+        prefix the critical rm -rf, rsync calls with either "echo " or use their own dry-run flag 
+        to avoid doing a real operation that will delete or move or change files etc. 
+
+        -m, --mode {LIVE|DEV|TEST} ...or other 
+        tell the script what to do in certain events/operations. 
+        currently not actually in use -only originally the dry-run option was flagged when NOT 'live' 
+
+        -f, --force-yes 
+        when stdin is asking for a y/n question force a 'y' to continue without user interaction
+
+        -l, --log-level {debug|error|other}
+        output extra debug 'puts' lines when needed ...like Rust's logging. 
+
+        -b, --bypass-null 
+        allow a target prefix of 'NULL', normally meaning it was the Development machine 
+        Warning: allowed to run on a live production machine, would copy over Development settings 
+        to the live working directories!
+
+        Last Edited: Tue 08 Nov 2022 21:18:53 
+
+        %s`, "\n" )
+
+}
+
 // #Terminal colors 
 // #Foreground Code	Background Code
 // #  Black
@@ -228,154 +263,6 @@ func debug_writer(data string, color string, bold_me bool, prefix string, level 
 // #  White
 // #  	37	47
 // #  
-// 
-// def debug(_params, bold_me=false)# {{{
-//     yellow="33"
-//     bold = bold_me ? "1" : "" 
-//     if _get_debug() >= 2 then 
-//         puts "\033[#{bold};#{yellow}mDEBUG: #{_params}  \033[0m"
-//     end
-// end# }}}
-// 
-// def error(_params, bold_me=false) # {{{
-//     red="31"
-//     bold = bold_me ? "1" : "" 
-//     if _get_debug() >= 1 then 
-//         puts "\033[#{bold};#{red}mERROR: #{_params}  \033[0m"
-//     end
-// end # }}}
-// 
-// def info(_params, bold_me=false) # {{{
-//     blue="34" 
-//     bold = bold_me ? "1" : "" 
-//     if _get_debug() >= 3 then 
-//         puts "\033[#{bold};#{blue}mINFO: #{_params}  \033[0m"
-//     end
-// end # }}}
-// 
-// 
-// def splash(version)# {{{
-// puts <<HERE
-// 
-//        &&& &&  & &&
-//       && &\/&\|& ()|/ @, &&
-//       &\/(/&/&||/& /_/)_&/_&
-//    &() &\/&|()|/&\/ '%" & ()
-//   &_\_&&_\ |& |&&/&__%_/_& &&
-// &&   && & &| &| /& & % ()& /&&
-//  ()&_---()&\&\|&&-&&--%---()~
-//      &&     \|||
-//              |||               mapcopy.rb XML Tree Spec File copier. 
-//              |||               for Ruby Version 3.x
-//              |||               Version: #{version}
-//        , -=-~  .-^- _ 
-// 
-// HERE
-// end# }}}
-// 
-// def show_version()# {{{
-//     puts "Version #{$VERSION}"
-// end # }}}
-// 
-// def show_help()# {{{
-//     puts <<ZZZ
-// 
-// SYNOPSIS
-//     mapcopy.rb OPTIONS 
-// 
-// DESCRIPTION
-//     copies via rsync calls all of the listed /etc, config, other files 
-//     with their proper file mode (mode/user/group) to the target dirs referenced 
-//     in the XML Tree Specification files. 
-//     
-//     OPTIONS
-//         -h, --help 
-//         show this help area. 
-// 
-//         -d, --dry-run 
-//         prefix the critical rm -rf, rsync calls with either "echo " or use their own dry-run flag 
-//         to avoid doing a real operation that will delete or move or change files etc. 
-// 
-//         -m, --mode {LIVE|DEV|TEST} ...or other 
-//         tell the script what to do in certain events/operations. 
-//         currently not actually in use -only originally the dry-run option was flagged when NOT 'live' 
-// 
-//         -f, --force-yes 
-//         when stdin is asking for a y/n question force a 'y' to continue without user interaction
-// 
-//         -l, --log-level {debug|error|other}
-//         output extra debug 'puts' lines when needed ...like Rust's logging. 
-// 
-//         -b, --bypass-null 
-//         allow a target prefix of 'NULL', normally meaning it was the Development machine 
-//         Warning: allowed to run on a live production machine, would copy over Development settings 
-//         to the live working directories!
-// 
-//         Last Edited: Mon 07 Nov 2022 20:50:15
-// 
-// ZZZ
-// 
-// end# }}}
-// 
-// def get_log_level(level)# {{{
-//     #puts "_level: #{_level}" 
-//     debug = nil 
-//     case level 
-//         when "error" then 
-//             debug = 1
-//         when "debug" then 
-//             debug = 2
-//         when "info" then 
-//             debug = 3 
-//         else 
-//             debug = 0 
-//     end
-//   
-//     return debug
-// end# }}}
-// 
-// def set_args()# {{{
-// # when terminate < 0 the handler NEEDS to kill this process!!!!!
-// # - shift will pop first element and move the whole array to the left. 
-//     args = $* 
-// 
-//     #return set 
-//     terminate = false
-//     dry_run = false 
-//     force_yes = false 
-//     run_mode = "" 
-//     bypass_target_null = false 
-//     debug = 0 
-// 
-//     while args.length > 0 do
-//         arg = args[0] 
-//         #doesnt kick in until log_level set anyways...
-//         #debug( "set_args: ind0: '#{arg}' " )
-//         case arg 
-//           when "--dry-run", "-d" then 
-//               dry_run = true
-//           when "--force-yes","-f" then 
-//               force_yes = true
-//           when "--mode","-m" then 
-//               run_mode = args[1] 
-//           when "--help","-h" then 
-//               show_help() 
-//               terminate = true
-//           when "--version", "-v" then 
-//               show_version()
-//               terminate = true
-//           when "--log-level", "-l" then 
-//               debug = get_log_level(args[1]) 
-//           when "--bypass-null", "-b" then 
-//               bypass_target_null = true
-//         end 
-//         args.shift
-//     end
-// 
-//     return terminate, dry_run, force_yes, run_mode, bypass_target_null, debug
-// 
-//   
-// end# }}}
 // 
 // def get_base() # {{{
 // #the bash script must output the var as 
