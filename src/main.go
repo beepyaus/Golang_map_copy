@@ -2,7 +2,18 @@ package main
 
 import (
 "fmt"
+"io/fs"
+"io"
 "os"
+"os/exec"
+"flag" 
+"log"
+"bytes" 
+"strings"
+"errors"
+"regexp"
+"encoding/xml"
+"strconv"
 )
 
 // 
@@ -38,126 +49,347 @@ import (
 // #        - OO ? wrap in a class? 
 // ###############################################################################################################
 
-var _debug int = 3
-var _version string = "0.0.1" 
+var Version string = "0.0.1"
+
+// #Hardcoded value to prefix the target destination for testing
+// #SET TO "" for the LIVE/REAL scenario testing
+var TEST_PREFIX = "/home/troy/Downloads/golang_test_mapcopy"
+//TEST_PREFIX = ""
+
+var Configdir string
+var Swapdir string 
+var Target string 
+var Buildname string 
+var Builddir string 
+var Sourcedir string 
+var Backupdir string 
+var Logfiledir string 
+var DryRun bool 
+var ForceYes bool 
+var RunMode string
+var BypassTargetNull bool 
+var Debug int //really log_level
+
+type FileData struct {
+    node string //'name' attr in XML spec. added cause of firehose model
+    file_level int
+    file_type string
+    file_user string
+    file_group string
+    file_mode string
+    default_file_user string
+    default_file_group string
+    default_file_mode string
+}
+
+//recursive added map of each file and dir
+//xml treespec version
+var FileMap map[string]FileData
+
+//recursive added map of each file and dir 
+//filesystem version
+var FileSourceMap map[string]FileData
 
 func main() {
-    fmt.Printf("Hello, world!\n")
+    s := "good bye"
+    var p *string = &s
+    *p = "ciao"
+    fmt.Printf("Here is the pointer p: %p\n", p) // prints address
+    fmt.Printf("Here is the string *p: %s\n", *p) // prints string
+    fmt.Printf("Here is the string s: %s\n", s) // prints same string
 
-    Debugln("testing one two three",false)
-    Errorln("testing one two three",false)
-    Infoln("testing one two three",true)
+    FileMap = make(map[string]FileData )
+    FileSourceMap = make(map[string]FileData )
 
-    splash(_version) 
-    show_version()
-    show_help()
+    var terminate bool 
 
-    var terminate, dry_run, force_yes, run_mode, bypass_target_null, debug = set_args() 
+    terminate, DryRun, ForceYes, RunMode, BypassTargetNull, Debug = set_args() 
 
-    Infoln(fmt.Sprintf("terminate: %v", terminate),false)
-    Infoln(fmt.Sprintf("dry_run: %v", dry_run),false)
-    Infoln(fmt.Sprintf("force_yes: %v", force_yes),false)
-    Infoln(fmt.Sprintf("run_mode: %v", run_mode),false)
-    Infoln(fmt.Sprintf("bypass_target_null: %v", bypass_target_null),false)
-    Infoln(fmt.Sprintf("debug: %v", debug),false)
+    //fmt.Printf("terminate %v \n" , terminate)
+    if terminate == true {
+        return 
+    }
 
+    //fmt.Printf("Debug = %v:\n" , Debug ) 
 
+    Debugln("testing one two three")
+    Errorln("testing one two three")
+    Infoln("testing one two three")
+
+    Infoln(fmt.Sprintf("terminate: %v", terminate))
+    Infoln(fmt.Sprintf("dry_run: %v", DryRun), "underline") 
+    Infoln(fmt.Sprintf("force_yes: %v", ForceYes))
+    Infoln(fmt.Sprintf("run_mode: %v", RunMode))
+    Infoln(fmt.Sprintf("bypass_target_null: %v", BypassTargetNull))
+    Infoln(fmt.Sprintf("debug: %v", Debug))
+
+    res_globals, err := set_globals()
+    if err != nil {
+        Errorln( fmt.Sprintf("set_globals failed!: %v", err.Error() ), "bold") 
+        Errorln( fmt.Sprintf("res_globals: %v", res_globals )) ; 
+        return 
+    }
+
+    splash(Version) 
+
+    //TODO
+    // if res , err := clean_backup_dir(Backupdir); err != nil {
+    //    Errorln("clean_backup_dir failure!") 
+    //    Errorln("clean_backup_dir: " + res ) 
+    //    return 
+    // }
+
+    // if res , err := setup_logfile_dir(Logfiledir); err != nil {
+    //    Errorln("setup_logfile_dir failure!") 
+    //    Errorln("setup_logfile_dir: " + err.Error() ) 
+    //    Infoln( fmt.Sprintf("setup_logfile_dir result: %v ", res))
+    //    return 
+    // }
     
+    webowner := get_webowner()
+    Debugln("webowner: " + webowner) 
+
+    map_copy("/root", false)
+
+// 
+// command_list, err = create_command_list($configdir, mapcopy_csv_file) 
+// unless err == nil 
+//   error "create_command_list failed!" 
+//   exit 5
+// end 
+// 
+// #TODO Need to decide if another ARGV is needed to proceed-on-error 
+// # or terminate of the first/any error and ignore the outstanding items in list.
+// 
+// unless true == result = process_commands(command_list)
+//   error "process_commands failed!"
+//   exit 6
+// end 
+
+}
+
+// type my_error struct {
+//     my_error_str string 
+// }
+// 
+// func (e *my_error) Error() string {
+//     return "my_error:: " + e.my_error_str
+// }
+
+func run_command(cmd *exec.Cmd) ( string, error)  {
+
+    var out bytes.Buffer
+    var errout bytes.Buffer
+
+    cmd.Stderr = &errout
+    cmd.Stdout = &out 
+
+    err := cmd.Run()
+	if err != nil {
+		//log.Fatal(err)
+        log.Printf("Command finished with error: %v", err)
+        Errorln( fmt.Sprintf("Cmd finished with error: %v", err) , "bold")
+        Errorln( "Stderr: " + errout.String()  )
+
+        myErr := errors.New(err.Error()) 
+    
+        return "ERROR", myErr
+	}
+
+    return out.String(), nil
+}
+
+func get_platform() string { 
+//remember the -s switch to just get the OS name    
+
+    cmd := exec.Command("uname", "-a") 
+
+    result, err := run_command(cmd ) 
+    
+    if err != nil {
+        Errorln( fmt.Sprintf( "Error calling run command : %v " , err) )
+        return "real error"
+    }
+
+    return result 
+
 }
 
 func get_log_level(level string) int {
-    debug :=0 
     switch level {
         case "error":
-            debug = 1
+            return 1
 
         case "debug":
-            debug = 2
+            return 2
 
         case "info" :
-            debug = 3 
+            return 3 
 
         default:
-            debug = 0 
+            return 0 
     }
-  
-    return debug
 } 
 
 func set_args() ( bool, bool, bool, string, bool, int ) {
 // when terminate < 0 the handler NEEDS to kill this process!!!!!
 // - shift will pop first element and move the whole array to the left. 
-    args := os.Args
+//NOTE: MAYBE cause it is  'go run .." but the vars did NOT seem to be set correctly! 
+// ..I refreshed a few times and then it worked. but I swear the code was right. 
+    
+    var help bool
+    var version bool
 
     //return set 
-    terminate := false
-    dry_run := false
-    force_yes := false 
-    run_mode := "" 
-    bypass_target_null := false 
-    debug := 0 
+    var terminate bool 
+    var dry_run bool
+    var force_yes bool
+    var run_mode string
+    var bypass_target_null bool
+    var log_level int
+    var log_level_text string
+    
+    flag.BoolVar(&dry_run, "dry-run", false, "either 'echo ' prefix for '--dry-run' flag for rsync,")
+    flag.BoolVar(&dry_run, "d", false, "either 'echo ' prefix for '--dry-run' flag for rsync,")
+    flag.BoolVar(&force_yes, "force-yes", false, "auto yes when stdin asking for user input.")
+    flag.BoolVar(&force_yes, "f", false, "auto yes when stdin asking for user input.")
+    flag.BoolVar(&help, "help", false, "")
+    flag.BoolVar(&help, "h", false, "")
+    flag.StringVar(&run_mode, "mode", "", "")
+    flag.StringVar(&run_mode, "m", "", "")
+    flag.BoolVar(&version, "version", false, "")
+    flag.BoolVar(&version, "v", false, "")
+    flag.StringVar(&log_level_text , "l", "", "")
+    flag.StringVar(&log_level_text, "log-level","" , "")
+    flag.BoolVar(&bypass_target_null, "b", false, "")
+    flag.BoolVar(&bypass_target_null, "bypass-null", false, "")
+    flag.Parse()
 
-    for ; len(args) > 0 ;  {
-        
-        arg := args[0] 
-        //doesnt kick in until log_level set anyways...
-        //debug( "set_args: ind0: '#{arg}' " )
-        switch arg {
-            case "--dry-run", "-d":
-                dry_run = true
-            case "--force-yes","-f":
-              force_yes = true
-            case "--mode","-m":
-              run_mode = args[1] 
-              case "--help","-h" : 
-              show_help() 
-              terminate = true
-              case "--version", "-v" : 
-              show_version()
-              terminate = true
-              case "--log-level", "-l" : 
-              debug = get_log_level(args[1]) 
-              case "--bypass-null", "-b" : 
-              bypass_target_null = true
-          } 
-        args = args[1:]
-        //shift(args)
+    if help || version { 
+        terminate = true
+    }
+    if help { 
+        show_help() 
+    }
+    if version {
+        show_version()
     }
 
-    return terminate, dry_run, force_yes, run_mode, bypass_target_null, debug
+    //fmt.Printf("get_log_level(log_level) = %v " , get_log_level(log_level_text))
+
+    log_level = get_log_level(log_level_text)
+
+    return terminate, dry_run, force_yes, run_mode, bypass_target_null, log_level
+
+    //-------------------------------OR----------------------------------
+    //this does work , but the 'flag' package SEEMS to work. 
+    //commented out as Go doesnt like vars no used ...like Rust I s'pose
+    //args := os.Args
+
+    // for ; len(args) > 0 ;  {
+    //     
+    //     arg := args[0] 
+    //     //doesnt kick in until log_level set anyways...
+    //     //debug( "set_args: ind0: '#{arg}' " )
+    //     switch arg {
+    //         case "--dry-run", "-d":
+    //             dry_run = true
+    //         case "--force-yes","-f":
+    //           force_yes = true
+    //         case "--mode","-m":
+    //           run_mode = args[1] 
+    //           case "--help","-h" : 
+    //           show_help() 
+    //           terminate = true
+    //           case "--version", "-v" : 
+    //           show_version()
+    //           terminate = true
+    //           case "--log-level", "-l" : 
+    //           debug = get_log_level(args[1]) 
+    //           case "--bypass-null", "-b" : 
+    //           bypass_target_null = true
+    //       } 
+    //     args = args[1:]
+    // }
+    // -------------------------------------------------------------------
+
 }
 
 func get_debug() int { 
-   return _debug
+   return Debug
 }
 
-func Debugln(data string, bold_me bool) { 
-    yellow := "33"
-    debug_writer(data, yellow, bold_me, "DEBUG:", 2) 
-}
 
-func Errorln(data string, bold_me bool) { 
-    // 'error' is a resevered interface word. 
-    red := "31"
-    debug_writer(data, red, bold_me, "ERROR:", 1)
-}
+func parse_debug_opts(opts []string) (bool,bool){ 
 
-func Infoln(data string, bold_me bool) { 
-    blue := "34"
-    debug_writer(data, blue, bold_me, "INFO:",3) 
-}
+    var bold_me = false 
+    var underline = false 
 
-func debug_writer(data string, color string, bold_me bool, prefix string, level int ) {
-
-    var bold string 
-    if bold_me == true { 
-        bold = "1" 
-    } else { 
-        bold = "" 
+    for _, v := range opts {
+        switch v {
+            case "bold": 
+                bold_me = true
+            case "underline": 
+                underline = true
+        }
     }
 
-    if get_debug() >= level {
-        fmt.Printf("\033[%s;%sm%s: %s  \033[0m\n", bold,  color, prefix,  data)
+    return bold_me, underline 
+}
+
+func Say(data string, opts ...string) { 
+//Perl say 
+
+    bold, underline := parse_debug_opts(opts) 
+    color := ""
+    prefix := ""
+
+    var style string 
+    if bold == true { 
+         style = "1" 
+    } else if underline {
+        style = "4"
+    }else{
+        style = ""
+    }
+
+    fmt.Printf("\033[%s;%sm%s: %s  \033[0m\n", style,  color, prefix,  data)
+}
+
+func Debugln(data string, opts ...string) { 
+
+    bold, underline := parse_debug_opts(opts) 
+    yellow := "33"
+    debug_writer(data, yellow, bold, "DEBUG:", 2, underline) 
+}
+
+func Errorln(data string, opts ...string) { 
+
+    bold, underline := parse_debug_opts(opts) 
+    red := "31"
+    debug_writer(data, red, bold, "ERROR:", 1, underline)
+}
+
+func Infoln(data string, opts ...string) { 
+
+    bold, underline := parse_debug_opts(opts) 
+    blue := "34"
+    debug_writer(data, blue, bold, "INFO:", 3, underline)
+}
+
+func debug_writer(data string, color string, bold_me bool, prefix string, writer_level int, underline_me bool ) {
+
+    var style string 
+    if bold_me == true { 
+         style = "1" 
+    }else if  underline_me {
+        style = "4"
+    }else{
+        style = ""
+    }
+
+    if get_debug() >= writer_level {
+        fmt.Printf("\033[%s;%sm%s: %s  \033[0m\n", style,  color, prefix,  data)
     }
 }
 
@@ -185,12 +417,11 @@ func splash(version string) {
 
 
 func show_version() {
-    fmt.Println("Version " + _version) 
+    fmt.Println("Version " + Version) 
 }
 
 func show_help() {
     fmt.Printf(`
-
 SYNOPSIS
     mapcopy.go OPTIONS 
 
@@ -264,245 +495,310 @@ DESCRIPTION
 // #  	37	47
 // #  
 // 
-// def get_base() # {{{
-// #the bash script must output the var as 
-// #foo: value
-// #foo: value 
-// #..and the ruby script will parse that
+
+func get_base() (map[string]string, error) {
+//#the bash script must output the var as 
+//#foo: value
+//#foo: value 
+//#..and the ruby script will parse that
+
+    //#_hostname = "";  #intentionally empty unless we need to be explicit.
+
+    //#TODO: move all this out , by using /usr/bin/env sh 
+    //#for the base_setup.sh to know/use the path etc .
+
+    //my_filename = $0
+
+    prog, err := os.Executable() //NOTE: incorrect when 'go run ..'
+    if err != nil {
+        Errorln("os Executeable error")
+        return nil , err 
+    }
+
+    Infoln(" prog = " + prog ) 
+
+
+//    #CAUTION: linux 'dirname' allows a -z to append a NULL char and NOT a \n 
+//    #but no option in OpenBSD
+    cmd := exec.Command("dirname", prog)
+    runtime_path, err := run_command(cmd) 
+    if err != nil {
+        Errorln("err calling dirname" ) 
+    }
+
+    
+//    #strip out \n 
+    runtime_path_trim := strings.Trim(  runtime_path , "\n") 
+    Debugln("runtime_path: '" + runtime_path_trim +  "' " ) 
+
+    
+//    #-h $hostname 
+//    #above switch NOT used. unless needed in future. 
+    cmd_base_setup := exec.Command( runtime_path_trim +  "/base_setup.sh")
+    
+    Infoln("after exec.Command" ) 
+    base_vars, err := run_command(cmd_base_setup)
+    if err != nil {
+        Errorln( fmt.Sprintf("base_setup.sh failed: %v" , err) )
+    }
+
+    fmt.Println("base_vars:" + base_vars) 
+
+    fields := make(map[string]string) 
+
+//TODO
+    lines := strings.Split(base_vars, "\n") 
+//     test := 
+// `eee: xxxX
+// SSS: KKKKKKK
+// zzz: ooppp`; 
 // 
-//     #_hostname = "";  #intentionally empty unless we need to be explicit.
-// 
-//     #TODO: move all this out , by using /usr/bin/env sh 
-//     #for the base_setup.sh to know/use the path etc .
-// 
-//     my_filename = $0
-//     #my_filename = __FILE__
-// 
-//     #CAUTION: linux 'dirname' allows a -z to append a NULL char and NOT a \n 
-//     #but no option in OpenBSD
-//     cmd_path = "dirname #{my_filename}" #zero is name of this perl script!
-//     debug( "cmd_path: '#{cmd_path}' " )
-// 
-//     runtime_path = %x(#{cmd_path})
-//     #puts "Result of dirname call (before line strip) : '#{runtime_path}' "
-// 
-//     #strip out \n 
-//     runtime_path = runtime_path.chomp 
-// 
-//     #-h $hostname 
-//     #above switch NOT used. unless needed in future. 
-//     cmd = "#{runtime_path}/base_setup.sh"
-//     debug( "Calling: base_setup.sh = #{cmd}")
-// 
-//     base_vars = %x( #{cmd} )
-//     debug( "base_vars : #{base_vars} ") 
-// 
-//     fields = {} # or Hash.new
-//     for line in base_vars.lines
-//         debug( "raw line : \"#{line.chomp}\" " )
-//         line =~ /^(.*?): (.*)$/ # Pre–colon text into $1, post–colon into $2
-//         debug( "$1 = '#{$1}' ")
-//         debug( "$2 = '#{$2}' ")
-//         fields[$1] = $2
-//     end
-//     
-//     debug( "variables from base_setup.sh...")
-// 
-//     fields.each do |key, value|
-//         debug( "\t#{key}:#{value}")
-//     end
-// 
-//     return fields 
-// 
-// end # }}}
-// 
-// def get_platform() # {{{
-//     #remember the -s switch to just get the OS name
-//     return %x{uname -a}
-// end# }}}
-// 
-// def setup_logfile_dir(logfile_dir)# {{{
-//     debug( "setup_logfile_dir:  logfile_dir: #{logfile_dir}")
-//     ##CAUTION: OpenBSD does NOT have '-v' args for mkdir !!!!
-//     cmd = "mkdir -p #{logfile_dir}" 
-//     debug( "command call: #{cmd} ")
-//     result = -1
-//     begin
-//         result = %x( #{cmd} )
-//         result = 0
-//     rescue 
-//         result = -2
-//         error "failure to run: " + cmd 
-//     end 
-//     debug( "mkdir result: #{result} ") 
-//     return result 
-// end# }}}
-// 
-// def clean_backup_dir(backup_dir)# {{{
-// #setup and clean out backup dir for next processing...
-//     debug( "clean_backup_dir: backup_dir: #{backup_dir}")
-// 
-//     if backup_dir.equal?("/") then 
-//         error "ERROR: backup_dir is root! Terminating now."
-//         return false
-//     end
-// 
-//     unless backup_dir.start_with?("/tmp") then 
-//         error "ERROR: backup_dir does not start with /tmp" 
-//         return false
-//     end 
-// 
-//     cmd = "rm -rf #{backup_dir} "
-//     debug "command call: #{cmd} "
-//     result = %x( #{cmd} )
-//     debug "clean_backup_dir: remove dir result : #{result}"
-// 
-//     #CAUTION: OpenBSD doesnt have -v args for mkdir
-//     cmd = "mkdir -p #{backup_dir} " 
-//     debug( "command call: #{cmd} " ) 
-//     result = %x( #{cmd} )
-//     debug( "clean_backup_dir: mkdir result : #{result}" )
-// 
-//     return true 
-// end# }}}
-// 
-// def file_data(level, type, user, group, mode, # {{{
-//                 default_file_user = "" , 
-//                 default_file_group ="", 
-//                 default_file_mode ="" )
-// #looks silly, but incase need to add something to do a test etc, just keep as a sub
-// #originally a Perl construct. 
-// #TODO: there may be a better way of doing this is Ruby. 
-// # symbols or something? 
-//     h = Hash.new 
-//     h['level'] = level 
-//     h['type'] = type 
-//     h['user'] = user 
-//     h['group'] = group 
-//     h['mode'] = mode 
-//     h['default_file_mode'] = default_file_mode 
-//     h['default_file_user'] = default_file_user 
-//     h['default_file_group'] = default_file_group
-//     return h
-// end# }}}
-// 
-// def scan_source(path_dir)# {{{
-// #create hashtable for the filesystem structure to then do a acl/mode comparision against .
-//     debug ""
-//     debug "scan_source, starting for path <DIR> '" + path_dir + "'...", true
-//     result = scan_source_dir(path_dir, 0)
-//     if result < 0 then 
-//         error "scan_source_dir did not complete ok. Error: " + result.to_s
-//         return result 
-//     end
-// 
-//     result = show_prelim(false)
-//     if result < 0 then 
-//         error "show_prelim did not complete ok. Error: " + result.to_s
-//         return result
-//     end
-// 
-//     return 0
-// 
-// end# }}}
-// 
-// def get_parent_perms(key_path)# {{{
-// #this filepath does NOT exist in the XML Treepath, so do up a level and get the default values. 
-//     debug "\tkey_path: #{key_path}"
-// 
-//     last_dir_pos = key_path.rindex("/") 
-//     last_dir = key_path[0,last_dir_pos]
-//     debug "\tlast_dir: #{last_dir}"
-// 
-//     if $fileMap.key?(last_dir) == false then 
-//         error "ERROR: there is no key in the XML spec tree for '#{last_dir}'\n\tAdjust XML spec or similar"
-//         return false
-//     end
-// 
-//     file_data = $fileMap[last_dir] 
-// 
-//     h = Hash.new 
-//     h['mode'] = file_data['mode'] 
-//     h['user'] = file_data['default_file_user'] 
-//     h['group'] = file_data['default_file_group']
-//     h['last_dir'] = last_dir 
-// 
-//     return h 
-// 
-// end# }}}
-// 
-// def get_mode(uri)# {{{
-// #do a file stat to get the Mode. 
-// #the perl chmod NEEDS an octal value input! 
-// #fyi: at THIS stage, it seems the result is bitmasked and output for the decimal output etc 
-// #but please note the octal printout format AND the bitwise mask 
-// 
-//     m = File.stat(uri).mode 
-// 
-//     #this returns 'good' value
-//     r1 = sprintf("%04o", m & 07777) #perls code too!
-// 
-//     #all these return same value 
-//     #puts "filemode oct: " + m.to_s(8)
-//     #r2 = sprintf("%04o", m) 
-//     #r3 = sprintf("%o", m) 
-// 
-//     #puts "filemode r2:  #{r2} " 
-//     #puts "filemode r3:  #{r3} " 
-//     #puts "filemode r1:  #{r1} " 
-// 
-//     return r1
-// 
-// end# }}}
-// 
-// def scan_source_dir(cur_dir, level)# {{{
-// #recusive scan into filesystem sourcedir to create hashmap of files and dirs
-// #to crossref with xml trees version 
-//     debug "" 
-//     debug("scan_source_dir call...")
-//     debug("\tsourcedir (GLOBAL): #{$sourcedir}" ) 
-//     debug("\tcur_dir: #{cur_dir}") 
-// 
-//     full_dir = $sourcedir + cur_dir
-//     debug("\tfull_dir (joined): #{full_dir}") 
-// 
-//     hash_key = cur_dir + "/" 
-//     debug "\tfileSourceMap <DIR> key insert : " + hash_key , true
-//     $fileSourceMap[ hash_key ] = file_data( level, 'd', '', '', get_mode(full_dir) ) 
-// 
-//     debug "\tEach file in Dir : '" + full_dir + "'..." 
-//     Dir.foreach(full_dir) { |file|
-//         #below . .. as not needed. 
-//         next if file == "." 
-//         next if file == ".." 
-// 
-//         debug ""
-//         debug("\t\t\tfile: #{file} ") 
-// 
-//         full_name = "#{full_dir}/#{file}"
-//         debug "\t\t\tfull_name: '" + full_name + "' "  
-//         if File.directory?(full_name) then 
-//             next_dir = cur_dir + "/" + file
-//             debug "\t\t\t\t<DIR>: next_dir: #{next_dir}" , true
-//             result = scan_source_dir(next_dir , level+1)
-//             if result < 0 then 
-//                 error "\t\t\t\tscan_source_dir error! for dir: " + next_dir 
-//                 return result
-//             end
-// 
-//         elsif File.file?(full_name) then 
-//             hash_key = "#{cur_dir}/#{file}"
-//             debug "\t\t\tfileSourceMap <FILE> insert, hash_key : '" + hash_key + "' ", true
-//             $fileSourceMap[hash_key] = file_data(level, 'f', '', '', get_mode(full_name)) 
-//         else
-//             error "\t\t\tscanning filesystem: entry not a dir or file!"
-//             return -1 
-//         end 
-//     }
-// 
-//     return 0 
-// end
-// # }}}
+//lines := strings.Split(test, "\n") 
+
+
+    //NOTE: TODO regex requests a space after the : 
+    // dbl check this is understood in the base-setup !!
+    re, err := regexp.Compile(`^(.*?): (.*)$`) 
+    if err != nil {
+        Errorln("regex did not compile!") 
+    }
+
+
+    for i := 0; i < len(lines) ; i++ { 
+//    fields = {} # or Hash.new
+//    for line in base_vars.lines
+        Debugln( "raw line : '" + lines[i] + "'" )
+        res := re.FindStringSubmatch(lines[i])
+        if len(res) != 3 {
+            Errorln("regex array wrong size!") 
+            continue
+        }
+        key := res[1] 
+        val := res[2]
+        Infoln("key = " + key, "underline" )
+        Infoln("val = " + val, "bold" )
+        fields[key] = val
+
+    }
+
+    Debugln( "variables from base_setup.sh..." ) 
+
+    for k, v := range fields {
+        Infoln( "field item key = " + k  + " , val = " + v )
+    } 
+
+    return fields, nil
+
+}
+
+func setup_logfile_dir(logfile_dir string) (bool, error) {
+    Debugln( "setup_logfile_dir:  logfile_dir: '" + logfile_dir + "' " ) 
+    //##CAUTION: OpenBSD does NOT have '-v' args for mkdir !!!!
+    cmd := exec.Command( "mkdir", "-p", "logfile_dir") 
+
+    res, err := run_command(cmd)
+    if err != nil {
+        //return false, errors.New( "mkdir command failed to run!" )
+        return false, err 
+    }
+    
+    Infoln("mkdir response: " + res ) 
+    return true, nil
+}
+
+
+func clean_backup_dir(backup_dir string) (string, error) { 
+//#setup and clean out backup dir for next processing...
+    Debugln( "clean_backup_dir: backup_dir: " + backup_dir )
+
+    if backup_dir == "/" {
+        err :=  "backup_dir is root! Terminating now."
+        Errorln(err)
+        return "", errors.New(err)
+    }
+
+    if backup_dir[:4] != "/tmp" {
+        err := "backup_dir does not start with /tmp" 
+        return "", errors.New(err) 
+    } 
+
+    cmd := exec.Command("rm",  "-rf" ,  backup_dir)
+    res, err := run_command(cmd) 
+    if err != nil {
+        err := "failed to run rm call " 
+        return "", errors.New(err) 
+    }
+
+    Debugln( "clean_backup_dir: remove dir result : " + res ) 
+
+    //CAUTION: OpenBSD doesnt have -v args for mkdir
+    cmd_mkdir := exec.Command( "mkdir" , "-p" , backup_dir )
+    res_mkdir, err := run_command(cmd_mkdir) 
+    if err != nil { 
+        Errorln("mkdir call failed!") 
+        return "" , err 
+    }
+
+    Debugln("result : " + res_mkdir) 
+
+    return res + "|" + res_mkdir , nil
+}
+
+
+ 
+func scan_source(path_dir string) (bool, error) { 
+//create hashtable for the filesystem structure to then do a acl/mode comparision against .
+    Debugln( "") 
+    Debugln( "scan_source, starting for path <DIR> '" + path_dir + "'...", "bold")
+
+    //reset the source map! 
+    FileSourceMap = make(map[string]FileData )
+
+    if _, err := scan_source_dir(path_dir, 0); err != nil {
+        Errorln( "scan_source_dir call error!") 
+        return false, err 
+    }
+
+   if _, err := show_prelim(false); err != nil { 
+       Errorln( "show_prelim call error!") 
+       return false, err 
+   }
+
+    return true, nil
+}
+ 
+ 
+func get_parent_perms(key_path string) (FileData, string, error) { 
+//this filepath does NOT exist in the XML Treepath, so do up a level and get the default values. 
+    Debugln( "\tkey_path: " +  key_path ) 
+
+    last_dir_pos := strings.LastIndex( key_path , "/") 
+    if last_dir_pos == -1 {
+       return FileData{} , "", errors.New("/ char not found in key_path param") 
+    }
+
+    last_dir := key_path[0: last_dir_pos]
+
+    Debugln( "\tlast_dir: " + last_dir)
+
+    if f, has := FileMap[last_dir]; has {
+        return f, last_dir, nil  
+    } else { 
+        err := "There is no key in the XML spec tree for '" + last_dir + "'\n\tAdjust XML spec or similar"
+        Errorln(err) 
+        return FileData{}, last_dir , errors.New(err) 
+    }
+
+    //TODO: just check if the this file_mode to file_mode mapping is corect 
+}
+
+ 
+func get_mode(file string) (string, error) { 
+//do a file stat to get the Mode. 
+//the perl chmod NEEDS an octal value input! 
+//fyi: at THIS stage, it seems the result is bitmasked and output for the decimal output etc 
+//but please note the octal printout format AND the bitwise mask 
+
+    fi, err := os.Lstat(file)
+	if err != nil {
+        Errorln("could not stat file: " + file ) 
+        return "", err
+	}
+
+    i_perm := fi.Mode().Perm()
+    s_perm := fmt.Sprintf("%#o", i_perm ) // 0400, 0777, etc.
+
+    Debugln( "s_perm : "  + s_perm ) 
+    //seems same as above
+    //Debugln( "Alt value " +   fmt.Sprintf("%04o", i_perm  & 07777) ) 
+
+
+    return s_perm, nil
+
+}
+
+ 
+func scan_source_dir(cur_dir string, level int) (bool, error) {
+//recusive scan into filesystem sourcedir to create hashmap of files and dirs
+//to crossref with xml trees version 
+    Debugln( "" ) 
+    Debugln("scan_source_dir call...")
+    Debugln("\tsourcedir (GLOBAL):" + Sourcedir  ) 
+    Debugln("\tcur_dir: " + cur_dir )  
+
+    full_dir := Sourcedir + cur_dir
+    Debugln("\tfull_dir (joined): " + full_dir) 
+
+    //TODO test the exact key's value against the FileMap -always!
+    //With the Ruby version and it's xml-simple routine, it was the case that the
+    // trialing lash HAD to be suffixed to get it in sync with the FileMap hashmap!!
+    //hash_key := cur_dir + "/" 
+    hash_key := cur_dir
+    Debugln ( "\tfileSourceMap <DIR> key insert : " + hash_key , "bold")
+
+    fm, err := get_mode(full_dir) 
+    if err != nil {
+        return false, err
+    }
+
+    fd := new(FileData) 
+    fd.file_level = level 
+    fd.file_type = "D" 
+    fd.file_mode = fm 
+
+    FileSourceMap[ hash_key ] = *fd
+
+    Debugln ( "\tEach file in Dir : '" + full_dir + "'..."  ) 
+
+    if files, err := os.ReadDir(full_dir); err != nil {
+        Errorln("Cannot read dir: " + full_dir ) 
+        return false, err
+    }else { 
+        for _, file := range files {     
+            if file.Name() == "." || file.Name() == ".." {
+                //Sat 12 Nov 2022 12:46:51 - does seem true
+                Debugln("Yes, Glang does read . / .. entry! ", "bold","underline")
+                continue 
+            }
+
+            Debugln( "")
+            Debugln("\t\t\tfile: " + file.Name() ) 
+
+            full_name := full_dir + "/" + file.Name()
+            Debugln ( "\t\t\tfull_name: '" + full_name + "' "  ) 
+
+            if file.IsDir() { 
+
+                next_dir := cur_dir + "/" + file.Name()
+                Debugln ( "\t\t\t\t<DIR>: next_dir: " + next_dir , "bold") 
+
+                if _ , err := scan_source_dir(next_dir , level+1); err != nil {
+                    Errorln ( "\t\t\t\tscan_source_dir error! for dir: " + next_dir )
+                    return false, err 
+                }
+            } else if file.Type().IsRegular() { 
+
+                hash_key := cur_dir + "/" + file.Name()  
+                Debugln ( "\t\t\tfileSourceMap <FILE> insert, hash_key : '" + hash_key + "' ", "bold") 
+                fm, err := get_mode(full_name)
+                if err != nil {
+                    return false, err
+                }
+                fd := new(FileData) 
+                fd.file_type = "F" 
+                fd.file_mode = fm
+                FileSourceMap[hash_key] = *fd  
+
+            }else {
+                Errorln( "\t\t\tscanning filesystem: entry not a dir or file!" + file.Name())
+                return false, err
+            } 
+        }//end for loop
+    }//end is valid ReadDir. 
+
+    return true, nil
+}
+
 // 
 // def scan_tree_simple( # {{{
 //         prev_path, 
@@ -647,397 +943,673 @@ DESCRIPTION
 // 
 // end# }}}
 // 
-// def get_webowner() # {{{
-//     webowner = "" #website structure user/group 
-//     case get_platform() 
-//         when /Alpine/
-//             webowner = "apache" 
-//         when /OpenBSD/
-//             webowner = "www"
-//         else 
-//             webowner = "http"
-//     end 
-//     return webowner 
-// end # }}}
-// 
-// def map_copy(path_dir, delete) # {{{
-// # open a xml tree spec to get mode/user/group etc 
-// # recurse into all directory elements to get all file elements etc 
-// # populate the hash tree with the full file path for easy lookup 
-// #pass over to copysourcefiles with delete param for rsync to decide if to rm extra files NOT in source dir.  
-// 
-//     unless Dir.exist?(path_dir) 
-//         return false
-//     end
-// 
-//     #TODO: turn into params , 
-//     #TODO  CHECK IF RUST CODE OR OTHER IS NOT AFFECTED BY --NOT-- CURRENTLY FLUSHING THESE TWO VARS!
-//     $fileMap.clear 
-//     $fileSourceMap.clear
-//     puts ""
-//     info "Starting map_copy: '" + path_dir + "'" , true
-//     info "\tclearing both hash maps : fileMap and fileSourceMap" 
-// 
-//     
-//     #NOTE: Ruby does NOT do nice find/replace regex all in one line like Perl5 
-//     #Example: file_part =~ s/[\/\.]/\_/g  was the original Perl call 
-// 
-//     #replace / . with _ chars 
-//     #the path will also have "." as is /logrotate.d/
-//     file_part = path_dir
-//     file_part = file_part.gsub(/[\/\.]/ ,"_") 
-//     debug "\tfile_part: '#{file_part}' " 
-// 
-//     file_name = "#{$configdir}/base_TREE_SPECS/spec#{file_part}.xml"
-//     puts "XML Spec Tree: '#{file_name}' "
-// 
-// #     test = { 
-// #         "test"=>"ss",
-// #         "dir" => [ 
-// #             {"at"=>"1" , "po"=>"2"},
-// #             {"at"=>"1" , "po"=>"2"}
-// #         ]
-// #     }
-// # 
-// #     puts "TEST" 
-// #     puts test 
-// #     foo = test['dir'] 
-// #     puts "foo isa: #{ foo.class }" 
-// #     puts "FOO" 
-// #     puts foo 
-// # 
-//     unless File.exist?(file_name) 
-//         error "\tFile spec '#{file_name}' not found."
-//         return false
-//     end
-// 
-//     tree_spec = XmlSimple.xml_in(file_name)
-//     unless tree_spec.class == Hash 
-//         error "\txml-simple did not return a hashmap!" 
-//         return false
-//     end
-// 
-//     #puts tree_spec 
-//     #puts tree_spec['directory']
-//     #puts "TREE dir #{t.class} "
-//     #return false
-// 
-//     #Toplevel must only be ONE 'directory' key ...unless XmlSimple changes. 
-//     result = scan_tree_simple("", tree_spec['directory'] , 0 )
-//     unless result 
-//         error("\tRoot scan_tree_simple returned false for " + file_name)  
-//         return false
-//     end
-// 
-//     
-// 
-//     #puts "=========DUMP========="
-//     #puts $fileMap; 
-// 
-//     #now scan source file dir created hashtable. 
-//     #recusrse into real build directory and cross-ref the mode/user/group from the hashtable. 
-//     
-//     result = scan_source(path_dir) 
-//     if result < 0 then 
-//         error "\tnon-ok termination! Err no: " + result.to_s
-//         return false
-//     end
-// 
-//     result = copy_source_files(path_dir, delete)
-//     unless result 
-//         error "\tfailed result from copy_source_files: '" + path_dir + "' "
-//         return false 
-//     end 
-// 
-// 
-//     #puts "-----dump source files--------- " 
-//     #puts $fileSourceMap 
-// 
-// 
-//     return true 
-// 
-// end# }}}
-// 
-// def copy_source_files(path_dir, delete = false)# {{{
-// #re-chmods the files/dirs that are in the preset TMP dir --NOT the target files 
-// #re-chowns the '' '' ''
-// #THEN rsync that dir structure across.
-// 
-//  
-//     debug("")
-//     debug("copy_source_files::Copying fileSourceMap data...") 
-// 
-//     debug "fileSourceMap files..."
-//     for k,v in $fileSourceMap 
-// 
-//         source_file = $sourcedir + k
-//         info("source_file: " + source_file) 
-// 
-//         p = sprintf("Copying: '%s' \n\t(L:%d) key:'%s' (%s) user:%s group:%s  mode:%s\n", 
-//             source_file, 
-//             v['level'],
-//             k,
-//             v['type'],
-//             v['user'],
-//             v['group'],
-//             v['mode'] )
-//               
-//         debug(p) 
-// 
-//         #CAUTION!!! chmod NEEDS OCTAL value! not string, or decimal!!!
-//         #r1 = sprintf("%04o", m & 07777) #perls code
-//         #o_mode = sprintf("%o",  m ).to_i(8) & 07777
-//         #o_mode = sprintf("%d",  m ).to_i(10)
-// 
-//         m = v['mode']
-//         o_mode = sprintf("%o",  m ).to_i(8) 
-// 
-//         debug( "mode (str) : " + m )
-//         debug( "mode (oct): #{o_mode} ")
-// 
-//         result = File.chmod(o_mode, source_file) 
-//         if result != 1 then 
-//             error( "File: #{source_file} did not chmod" )
-//             result false 
-//         end 
-// 
-//         g = v['group'] 
-//         u = v['user'] 
-//         debug "user: " + u 
-//         debug "group: " + g
-// 
-//     
-//         group_info = Etc.getgrnam(g)
-//         gid = group_info.gid 
-// 
-//         user_info = Etc.getpwnam(u)
-//         uid = user_info.uid 
-// 
-//         debug "user: '" + u + "' uid= " + uid.to_s 
-//         debug "group: '" + g + "' gid= " + gid.to_s 
-// 
-//         result=0
-//         begin
-//             result = File.chown( uid, gid , source_file) 
-//         rescue
-//             error "result is:" + result.to_s
-//             error( "File: #{source_file} did not chown." )
-//         end 
-//         
-//         if result != 1 then 
-//             error( "File result !=1 : #{source_file} did not chown." )
-//             return false 
-//         end 
-// 
-// 
-//     end
-// 
-//     logfile_part = path_dir
-//     logfile_part = logfile_part.gsub(/\//, "_") #replace / with _ char. 
-// 
-//     rsync_dryrun = _get_dry_run() ? "--dry-run " : ""
-//     rsync_switches ="#{rsync_dryrun}-a --human-readable --verbose"
-//     rsync_backup = " --backup --backup-dir=#{$backupdir}#{path_dir}"
-//     rsync_logfile = " --log-file=#{$logfiledir}/#{logfile_part}_#{ Time.now.to_i }.log"
-//     rsync_delete = delete ? " --delete" : ""
-//     
-//     #prefix normally /home/foo/Downloads/perl_test to safeguard against overcopy.
-//     target_dir = $TEST_PREFIX + path_dir
-//     debug("target_dir: " + target_dir)
-//     
-//     #CAUTION: OpenBSD does not do -v for mkdir 
-//     mkdir_target = "mkdir -p #{target_dir}"
-//     debug "mkdir call '#{mkdir_target}'" 
-//     res = %x( #{mkdir_target} ) 
-//     debug( "result mkdir target: '#{res}' ")
-//     
-//     #IMPORTANT! use the trailing  '/' at end of rsync source to avoid starting at the dir, ..so to get contents of the dir.
-//     #TODO: Rust's version FAILS when extra blank space chars are between args. Dbl check here. 
-//     # ...rsync main.c (1492) err or something. 
-//     rsync_call = "rsync #{rsync_switches}#{rsync_delete}#{rsync_backup}#{rsync_logfile} #{$sourcedir}#{path_dir}/ #{target_dir}"
-//     debug( "calling: #{rsync_call}")
-// 
-//     res = %x( #{rsync_call} )
-//     debug( "rsync result : '#{res}' " )
-//     #TODO parse the stdout response!!!
-//     # this assumes it ran okay!
-// 
-//     return true 
-// 
-// end #func# }}}
-// 
-// def show_prelim(this_is_re_show = false) # {{{
-// #show to user What will happen re file Mode, Missing etc   
-// #iterate the xmltree first then the filesys source tree 
-// 
-//     puts ""
-//     puts "====================== XML Tree spec map =============================="
-//     puts "??? = File missing from XML spec master file."
-//     puts "======================================================================="
-//     puts ""
-// 
-//     for key,item in $fileMap
-//        alert = $fileSourceMap.has_key?(key) ? "   " : "???" 
-//        printf("%s %s %s:%s %s L%d %s\n" ,
-//                alert,
-//                (item['type'] ||= '?').upcase,
-//                item['user'] ||= "NULL",
-//                item['group'] ||= "NULL", 
-//                item['mode'] ||= "NULL", 
-//                item['level'] , 
-//                key, 
-//         )
-//     end 
-// 
-//     puts "" 
-//     puts "===================== Filesystem source map ==========================="
-//     puts "??? = File not listed in XML Tree spec. "
-//     puts "XXX = File's mode will be overridden to match the XML file's version. "
-//     puts "      <<OVERRIDE>>  OLD --> NEW "
-//     puts "======================================================================="
-//     puts "" 
-//  
-//     for key, item in $fileSourceMap 
-//         msg = ""
-//         alert = "   "
-// 
-//         if $fileMap.has_key?(key) then 
-//              #it exists in the XML treemap...
-//              #the fileSourceMap CANNOT really have the target user/group as it is coming from a dev machine anyway. 
-//              $fileSourceMap[ key ]['user'] = $fileMap[ key ]['user']
-//              $fileSourceMap[ key ]['group'] = $fileMap[ key ]['group']
-// 
-//             if $fileMap[ key ]['mode'] != item['mode'] then
-//                 alert = "XXX"
-//                 msg = "<<OVERRIDE>> #{item['mode']} --> #{$fileMap[ key ]['mode']} "
-//                 #RESET value to match the XML spec.
-//                 $fileSourceMap[ key ]['mode'] = $fileMap[ key ]['mode']
-//             end
-//             
-//         else 
-//             #missing file: 
-//             #the file in the sourcemap is NOT in the XML tree spec. 
-//             #get last dir / go up a dir and get the default perms for that file. 
-//             perms = get_parent_perms(key)
-//             unless perms
-//                 error "Failed to get parent permissions for '" + key + "' "
-//                 return -3
-//             end 
-//             alert="???"
-//             msg="**Missing** (owner dir: #{perms['last_dir'] } )"
-//             $fileSourceMap[ key ]['user'] = perms['user']
-//             $fileSourceMap[ key ]['group'] = perms['group']
-//             $fileSourceMap[ key ]['mode'] = perms['mode']
-//         end 
-// 
-//        printf("%s %s %s:%s %s L%d %s %s\n" ,
-//                alert,
-//                item['type'].to_s.upcase, 
-//                item['user'] ||= "NULL",
-//                item['group'] ||= "NULL", 
-//                item['mode'] ||= "NULL", 
-//                item['level'] , 
-//                key, 
-//                msg
-//         )
-// 
-//     end #endfor
-// 
-//     debug "tree spec count:  #{$fileMap.count} "
-//     debug "file source count: #{$fileSourceMap.count} "
-// 
-//     if _get_force_yes() then
-//         puts "FORCING a Yes for all would-be user input!"
-//     else
-//         puts "Considering all above, proceed with the file copy tasks? y/N"
-//         answer = gets 
-//         answer  = answer.gsub(/\n/ , "") 
-//         debug "STDIN: answer:  '#{answer}' " 
-//         if answer.upcase == 'Y' then
-//             
-//               unless this_is_re_show then 
-//                   result = show_prelim(true)
-//                   if result < 0 then 
-//                       return result
-//                   end
-//               end
-//             puts "Answered 'Yes', Now Processing..."
-// 
-//         elsif answer.upcase == 'N' || answer == "" then
-//             puts "Answers 'No' -Bailing out of the map_copy!"
-//             return -1
-//         else 
-//             error "Could not understand response. Terminating now. "
-//             return -2
-//         end
-//     end
-// 
-//     return 0
-// 
-// end# }}}
-// 
-// 
-// def set_globals() 
-// #store the common variables from common shell script
-//     recs = get_base()
-//     debug("set_globals: recs type: " + recs.class.to_s) 
-//     unless recs.is_a?(Hash) 
-//         error "get_base did not return a HashMap!" 
-//         return -1
-//     end
-//     if recs.empty then 
-//         error "get_base() did not return any records!" 
-//         return -2
-//     end if 
-//     if (err = recs['ERROR']) != nil then 
-//         error "Terminal error for base_setup: " + err 
-//         return -3
-//     end 
-// 
-//     null="NULL"
-// 
-//     $configdir = recs[ 'configdir' ] ||= null
-//     $swapdir = recs[ 'swapdir' ] ||= null
-//     $target = recs[ 'target' ] ||= null
-//     $buildname = recs[ 'buildname' ] ||= null
-//     $builddir = recs[ 'build_dir' ] ||= null
-//     $sourcedir = $builddir
-// 
-//     $backupdir = "#{$swapdir}/base_backup_BUILD_#{$target}"
-//     $logfiledir = "#{$swapdir}/rsync_log"
-// 
-//     debug("$sourcedir = #{$sourcedir}" )
-// 
-//     #just ignore the NULL suffix, as a Dev machine was most likely matched 
-//     target_null_test = _get_bypass_target_null() ? "" : null
-//         
-//     if [ target_null_test, "" ].any?{|i| i == $target } then 
-//         error( "target is NULL or empty.\n\tTerminating process\n\tProbably running on the bare metal dev machine. this is a no-no. ")
-//         return -4
-//     end
-// 
-// #recursive added map of each file and dir
-// #xml treespec version
-//     $fileMap = {} 
-// 
-// #recursive added map of each file and dir 
-// #filesystem version
-//     $fileSourceMap = {}
-// 
-//     debug( "ARG: debug: #$debug" )
-//     debug( "ARG: run_mode = #{$run_mode}" )
-//     debug( "ARG: force_yes = #{$force_yes}")
-//     debug( "ARG: dry_run = #{$dry_run}" )
-//     debug( "ARG: bypass_target_null = #{$bypass_target_null}" )
-//     debug( "TEST_PREFIX:  '#{$TEST_PREFIX}' " )
-// 
-//     if $dry_run then 
-//         puts "Running in DRY-RUN mode for rsync, no changes saved!!!"
-//     end
-// 
-//     return 0
-// 
-// end 
+func get_webowner() string  { 
+    p := get_platform()
+    if strings.Contains(p, "Alpine") {
+        return "apache" 
+    } else if strings.Contains(p, "OpenBSD") {
+        return "www"
+    }else {
+        return "http"
+    } 
+}
+
+ 
+func map_copy(path_dir string, delete_outsiders bool) (bool, error) {
+//  open a xml tree spec to get mode/user/group etc 
+//  recurse into all directory elements to get all file elements etc 
+//  populate the hash tree with the full file path for easy lookup 
+//  pass over to copysourcefiles with delete param for rsync to decide if to rm extra files NOT in source dir.  
+
+    //path_dir_fileinfo, err := os.Stat( path_dir )
+    if _, err := os.Stat( path_dir ); err != nil {
+        //if errors.Is(err, fs.PathError) {
+            Errorln( fmt.Sprintf("path_dir: %v does not exist!", path_dir ))
+            Errorln( "error: " + err.Error()) 
+            return false, err
+        //}
+    }
+
+    //TODO: turn into params , 
+    //TODO  CHECK IF RUST CODE OR OTHER IS NOT AFFECTED BY --NOT-- CURRENTLY FLUSHING THESE TWO VARS!
+    FileMap = make(map[string]FileData)
+    FileSourceMap = make(map[string]FileData)
+    fmt.Println("") 
+    Infoln("Starting map_copy: '" + path_dir + "'", "bold") 
+    Infoln("\tclearing both hash maps : fileMap and fileSourceMap" )
+
+    
+    // replace / . with _ chars 
+    // the path will also have "." as is /logrotate.d/
+    re, err := regexp.Compile(`[\/\.]`) 
+    if err != nil {
+        Errorln("file_part regex did not compile!") 
+        return false, err 
+    }
+
+    file_part := re.ReplaceAllString(path_dir,"_") 
+    Debugln( "\tfile_part: '" + file_part + "' " )
+
+    file_name := fmt.Sprintf("%v/base_TREE_SPECS/spec%v.xml", Configdir, file_part)
+
+    Infoln( fmt.Sprintf( "XML Spec Tree: '%v'", file_name))
+
+
+    //spec_fileinfo, err := os.Stat( file_name )
+    if _ , err := os.Stat( file_name ); err != nil {
+        //if errors.Is(spec_err, fs.PathError) {
+            Errorln( fmt.Sprintf("file_name: %v does not exist!", file_name ))
+            return false, err
+        //}
+    }
+
+    if _, err := scan_tree_firehose(file_name); err != nil {
+        Errorln("Error: " + err.Error() )
+        return false, err
+    }
+
+
+    //now scan source file dir created hashtable. 
+    //recusrse into real build directory and cross-ref the mode/user/group from the hashtable. 
+    if _ , err := scan_source(path_dir); err != nil {
+         Errorln( "\tscan_source call error!" ) 
+         return false, err
+    }
+
+    if _, err := copy_source_files(path_dir, delete_outsiders ); err != nil {
+         Errorln( "\tfailed result from copy_source_files: '" + path_dir + "' ")
+         return false, err
+    }
+
+    return true , nil 
+}
+
+
+func explode_path_stack(p []string ) string {
+    return strings.Join(p, "/") 
+}
+
+func (f *FileData ) extract_attrs(attrs []xml.Attr, default_perms_stack []FileData,  current_level int) { 
+//cycle thru the Attribs and assign only when matched 
+//when not found AND a default record is found on the Stack, get that one 
+
+
+    f.file_level = current_level 
+    //get last item on the stack. 
+    var has_dp bool 
+    var dp FileData 
+    Infoln( fmt.Sprintf("len default_perms_stack = %v ", len(default_perms_stack) ))
+    if len(default_perms_stack) > 0 {
+        has_dp = true 
+        dp = default_perms_stack[ len(default_perms_stack) - 1 ]
+    }
+
+    def_fm_found := false 
+    def_fu_found := false 
+    def_fg_found := false 
+    
+    for _, attr := range attrs {
+        v := attr.Value
+        switch attr.Name.Local {
+            case "name":
+                f.node = v
+
+            case "mode":
+                f.file_mode = v
+
+            case "user":
+                f.file_user = v
+
+            case "group":
+                f.file_group = v
+
+            case "default_file_mode":
+                def_fm_found = true
+                f.default_file_mode = v
+
+            case "default_file_user": 
+                def_fu_found = true
+                f.default_file_user = v
+
+            case "default_file_group":
+                def_fg_found = true
+                f.default_file_group = v
+        }
+    }
+    //when a higher-up record contains default perms
+    //and the default attrs were not found on this element..
+    if has_dp && !def_fm_found {
+        f.default_file_mode = dp.default_file_mode 
+    }
+    if has_dp && !def_fu_found {
+        f.default_file_user = dp.default_file_user
+    }
+    if has_dp && !def_fg_found {
+        f.default_file_group = dp.default_file_group
+    }
+}
+
+func scan_tree_firehose(dir_path string) (bool, error) { 
+//firehose model: readonly forward only!
+//scan all the tags in a continuous loop until tags are read and EOF is hit. 
+
+    var current_level int = -1 // neg-zero as 'tree' root element not used.
+    var path_stack []string
+    var default_perms_stack []FileData
+
+    var file *os.File
+    var file_err error
+
+    if file, file_err = os.Open(dir_path) ; file_err != nil { 
+        Errorln( "cannot open file: " + dir_path ) 
+        return false, file_err
+    }
+
+    dec := xml.NewDecoder(file)
+
+    for { 
+        tok, err := dec.Token()
+        if err == io.EOF {
+            break
+        } else if err != nil {
+            Errorln("token error: " + err.Error() ) 
+            return false,err
+            //break 
+            //fmt.Fprintf(os.Stderr, "xmlselect: %v\n", err)
+            //os.Exit(1)
+        }
+
+        switch tok := tok.(type) {
+            case xml.StartElement:
+
+                if tok.Name.Local == "tree" {
+                    //skip the tree wrapper element
+                    continue
+                }
+
+                fd := new(FileData) //new temp record.
+
+                if tok.Name.Local == "directory" {
+                    current_level++ //push the current level 
+                    fd.file_type = "D"
+                } else {
+                    fd.file_type = "F"
+                }
+
+
+                fd.extract_attrs(tok.Attr, default_perms_stack, current_level )
+
+                if fd.file_type == "D" { 
+                    default_perms_stack = append( default_perms_stack , *fd ) 
+                }
+
+                path_stack = append(path_stack, fd.node) // push
+
+                full_name := explode_path_stack(path_stack)
+
+                FileMap[full_name] = *fd
+
+            case xml.EndElement:
+                if tok.Name.Local == "tree" {
+                    continue
+                }
+                if tok.Name.Local == "directory" {
+                    current_level-- //pop off  leaving dir
+                    default_perms_stack = default_perms_stack[:len(default_perms_stack)-1] 
+                }
+
+                path_stack = path_stack[:len(path_stack)-1] // pop
+        }
+    }
+    
+     Debugln("")
+     Debugln("FileMap entries!...", "bold") 
+     for k, v := range(FileMap) {
+         Debugln( fmt.Sprintf("Lv: %v Type:%v Key: '%v'", v.file_level, v.file_type, k ))
+    }
+//     for k, v := range(FileMap) {
+//         fmt.Printf("\nFileMap: '%v'", k)
+//         fmt.Printf("\n\t T=%v L=%v m=%v, u=%v g=%v du=%v dg=%v dm=%v ", 
+//             v.file_type, 
+//             v.file_level, 
+//             v.file_mode, 
+//             v.file_user, 
+//             v.file_group, 
+//             v.default_file_user, 
+//             v.default_file_group, 
+//             v.default_file_mode)
+//     }
+// 
+    return true, nil
+
+}
+
+func get_etc_user() (map[string]int, error) { 
+    if r, err := get_etc_secfile(true); err != nil {
+        return nil, err 
+    } else {
+        return r, nil
+    }
+}
+func get_etc_group() (map[string]int, error) { 
+    if r, err := get_etc_secfile(false); err != nil {
+        return nil, err 
+    } else {
+        return r, nil
+    }
+}
+
+func get_etc_secfile(getuserfile bool) (map[string]int, error) {
+//dont use directly
+//parse the /etc/group file and return hashmap 
+//or 
+//parse the /etc/passwd file and return hashmap 
+
+    var filepath string 
+    if getuserfile {
+        filepath = "/etc/passwd"
+    }else{
+        filepath = "/etc/group"
+    }
+
+
+    if  b_arr, err := os.ReadFile(filepath); err != nil {
+        Errorln("cannot open the file: '" + filepath + "' !") 
+        return nil, err
+    } else {
+        str := string(b_arr[:])
+        Debugln("file data...") 
+        Debugln(str)
+
+        entries := make(map[string]int) 
+        lines := strings.Split(str, "\n") 
+        for _ , line := range lines { 
+            Debugln("line=" + line) 
+            cols := strings.Split(line, ":") 
+
+            if len(cols) < 3 {
+                //probably the trailing \n 
+                continue 
+            }
+
+            kname := cols[0] 
+            id_str := cols[2]
+            id , id_err := strconv.ParseInt(id_str , 10, 32  ) 
+            if id_err != nil {
+                Errorln("id parse error") 
+                Errorln(id_err.Error())
+                return nil, err
+            }
+
+            Infoln( fmt.Sprintf("key name='%v' , id='%v' ", kname, id)) 
+            entries[kname] = int(id)
+        }
+
+        //for k, x := range groups {
+        //    fmt.Printf("\n G=%v , ID=%v", k, x)
+        //}
+
+        return entries, nil
+
+    }
+
+    //if all goes well. shoudnt get here
+    return nil, errors.New("get_etc_secfile default fail") 
+}
+
+func copy_source_files(path_dir string, delete_outsiders bool) (bool, error) { 
+//re-chmods the files/dirs that are in the preset TMP dir --NOT the target files 
+//re-chowns the '' '' ''
+//THEN rsync that dir structure across.
+    Debugln("")
+    Debugln("copy_source_files::Copying FileSourceMap data...") 
+    Debugln ("fileSourceMap files...") 
+    for k,v := range FileSourceMap {
+
+        source_file := Sourcedir + k
+        Infoln("source_file: " + source_file) 
+
+        Debugln(fmt.Sprintf("Copying: '%v' \n\t(L:%v) key:'%v' (%v) user:%v group:%v  mode:%v\n", 
+            source_file, 
+            v.file_level,
+            k,
+            v.file_type,
+            v.file_user,
+            v.file_group, 
+            v.file_mode ))
+              
+        //CAUTION!!! chmod NEEDS OCTAL value! not string, or decimal!!!
+        //r1 = sprintf("%04o", m & 07777) #perls code
+        //o_mode = sprintf("%o",  m ).to_i(8) & 07777
+        //o_mode = sprintf("%d",  m ).to_i(10)
+
+        m := v.file_mode
+
+        if o_mode, err := strconv.ParseUint(m,8,32); err != nil {
+            Errorln("file_mode didnot parse okay!") 
+            return false, err
+        }else{
+            var fmode fs.FileMode
+            fmode = fs.FileMode(o_mode)
+            Debugln( fmt.Sprintf("mode (oct): %v ", fmode ))
+            Debugln("Stubbed CHMOD!") 
+            //if err := os.Chmod(source_file, fmode) ; err != nil{
+            //    Errorln( "File: '" + source_file + "' did not chmod" )
+            //    return false, err
+            //}
+        }
+
+        glist, err := get_etc_group()
+        if err != nil { 
+            return false, err 
+        }
+        ulist, err := get_etc_user()
+        if err != nil { 
+            return false, err 
+        }
+
+        g := v.file_group 
+        u := v.file_user 
+
+        var gid int 
+        var has_gid bool 
+        if gid, has_gid = glist[g]; !has {
+            g_notfound_err := errors.New("group name not found:" + g)
+            return nil , g_notfound_err
+        }
+
+        var uid int 
+        var has_uid bool 
+        if uid, has_uid = ulist[u]; !has {
+            u_notfound_err := errors.New("user name not found:" + g)
+            return nil , u_notfound_err
+        }
+        
+
+        Debugln( fmt.Sprintf( "user:%v, uid:%v", u, uid ))
+        Debugln( fmt.Sprintf( "group:%v, gid:%v", g, gid ))
+
+        Debugln("STUBBED CHOWN!!") 
+        // if err := os.Chown(source_file, uid, gid) ; err != nil{
+        //     Errorln( "File: '" + source_file + "' did not chown correctly." )
+        //     return false, err
+        // }
+
+    }
+
+    //replace / with _  
+    logfile_part = strings.Replace( path_dir, "/", "_", -1) 
+
+    var rsync_dryrun string 
+    if DryRun {
+        rsync_dryrun = "--dry-run " 
+    }else {
+        rsync_dryrun = "" 
+    }
+
+    time_now := ""
+    rsync_switches := fmt.Sprintf( "%v-a --human-readable --verbose", rsync_dryrun ) 
+    rsync_backup := fmt.Sprintf( "--backup --backup-dir=%v%v", Backupdir, path_dir)
+    rsync_logfile := fmt.Sprintf( " --log-file=%v/%v_%v.log",
+                        Logfiledir, 
+                        logfile_part,
+                        time_now ) 
+
+    var rsync_delete string 
+    if delete_outsiders { 
+        rsync_delete = " --delete" 
+    } else { 
+        rsync_delete = ""
+    }
+     
+    //prefix normally /home/foo/Downloads/perl_test to safeguard against overcopy.
+    target_dir := TEST_PREFIX + path_dir
+    Debugln("target_dir: " + target_dir)
+     
+    //CAUTION: OpenBSD does not do -v for mkdir 
+    cmd_mkdir := exec.Command("mkdir", "-p", target_dir ) 
+    if r, err := run_command(cmd_mkdir); err != nil {
+       return false, err 
+    }
+    
+    // IMPORTANT! use the trailing  '/' at end of rsync source to avoid starting at the dir, ..so to get contents of the dir.
+    // TODO: Rust's version FAILS when extra blank space chars are between args. Dbl check here. 
+    //  ...rsync main.c (1492) err or something. 
+    //rsync_call := "rsync #{rsync_switches}#{rsync_delete}#{rsync_backup}#{rsync_logfile} #{$sourcedir}#{path_dir}/ #{target_dir}"
+    rsync_call := fmt.Sprintf( "rsync %v%v%v %v %v%v/ %v", 
+                        rsync_switches, 
+                        rsync_delete, 
+                        rsync_backup, 
+                        rsync_logfile, 
+                        Sourcedir, 
+                        path_dir, 
+                        target_dir)
+
+    Debugln( "calling: " + rsync_call )
+
+    // res = %x( #{rsync_call} )
+    // debug( "rsync result : '#{res}' " )
+    // #TODO parse the stdout response!!!
+    // # this assumes it ran okay!
+
+    // return true 
+
+    return true, nil
+
+}
+ 
+func show_prelim(this_is_re_show bool) (bool, error)  {
+//show to user What will happen re file Mode, Missing etc   
+//iterate the xmltree first then the filesys source tree 
+
+    Say( "")
+    Say( "====================== XML Tree spec map ==============================" ) 
+    Say( "??? = File missing from XML spec master file.")
+    Say( "=======================================================================")
+    Say( "")
+
+    for key , item := range FileMap {
+        var alert string 
+        if _, has := FileSourceMap[ key ]; has {
+            alert = "   " 
+        }else {
+            alert = "???"
+        }
+
+        var ftype string 
+        if ftype = item.file_type; ftype == "" {
+            ftype = "?"
+        }
+
+        Say( fmt.Sprintf("%v %v %v:%v %v L%v %v\n" ,
+            alert,
+            ftype, 
+            item.file_user, 
+            item.file_group, 
+            item.file_mode,
+            item.file_level , 
+            key, 
+        ))
+    } 
+
+    Say("")
+    Say("===================== Filesystem source map ===========================")
+    Say("??? = File not listed in XML Tree spec. ")
+    Say("XXX = File's mode will be overridden to match the XML file's version. ")
+    Say( "      <<OVERRIDE>>  OLD --> NEW ")
+    Say( "=======================================================================")
+    Say( "" )
+
+    for key, item := range FileSourceMap {
+        var msg string
+        var alert string
+        if f, has := FileMap[key]; has  {
+            //it exists in the XML treemap...
+            //the FileSourceMap CANNOT really have the target user/group as it is coming from a dev machine anyway. 
+
+            item.file_user = f.file_user
+            item.file_group = f.file_group
+            if f.file_mode != item.file_mode {
+                alert = "XXX"
+                msg = "<<OVERRIDE>> " + item.file_mode + " --> " + f.file_mode
+                //RESET value to match the XML spec.
+                //FileSourceMap[key].file_mode = f.file_mode
+                item.file_mode = f.file_mode
+            }
+
+           FileSourceMap[key] = item  
+        } else {
+            //missing file: 
+            //the file in the sourcemap is NOT in the XML tree spec. 
+            //get last dir / go up a dir and get the default perms for that file. 
+            if perms, last_dir, err := get_parent_perms(key); err != nil {
+                Errorln( "Failed to get parent permissions for '" + key + "' ")
+                return false, err 
+            } else {
+                alert="???"
+                msg="**Missing** (owner dir: " + last_dir + ")"
+                item.file_user = perms.file_user
+                item.file_group = perms.file_group
+                item.file_mode = perms.file_mode
+            }//
+        } 
+
+        if len(alert) == 0 {
+            alert = "   "
+        }
+
+        Say ( fmt.Sprintf("%v %v %v:%v %v L%v %v %v\n" ,
+                    alert,
+                    item.file_type, 
+                    item.file_user ,
+                    item.file_group ,  
+                    item.file_mode ,
+                    item.file_level , 
+                    key, 
+                    msg))
+
+        //reset the value to the updated FileData struct!
+        FileSourceMap[key] = item 
+    } //endfor
+
+    Debugln( fmt.Sprintf( "XML Tree Spec record count: %v", len(FileMap)))
+    Debugln( fmt.Sprintf( "  File-source record count: %v", len(FileSourceMap)))
+
+    if ForceYes {
+        Say( "FORCING a Yes for all would-be user input!")
+    }else{
+        Say( "Considering all above, proceed with the file copy tasks? y/N")
+
+        var answer string 
+        if _ , err := fmt.Scan(&answer); err != nil {
+            Errorln("Did not scan line correctly!") 
+            return false, err 
+        }
+
+        Debugln( "STDIN: answer:  '" + answer + "' " )
+
+        if answer == "y" || answer == "Y" {
+
+            if this_is_re_show == false {
+                if _, err := show_prelim(true); err != nil {
+                    return false, err
+                }
+            }
+
+            Say( "Answered 'Yes', Now Processing...")
+
+        } else if answer == "N" || answer == "\n" || answer == "n" {
+            Say( "Answers 'No' -Bailing out of the map_copy!")
+                return false, errors.New("A 'no' answer was taken.")
+        } else {
+            err := "Could not understand response. Terminating now. "
+            Errorln(err)
+            return false, errors.New(err)
+        }
+    }
+
+    return true, nil
+} 
+
+func set_globals() (bool , error) { 
+//store the common variables from common shell script
+//the globals from the command line should already be set. 
+
+    recs, err := get_base()
+    if err != nil {
+        Debugln("set_globals: recs type: " + err.Error() ) 
+        return false, err
+    }
+        
+    if len(recs) == 0  {
+        Errorln( "get_base() did not return any records!" ) 
+        return false, errors.New("empty set") 
+    }
+
+    if  _ , found := recs["ERROR"]; found {
+        Errorln( "Terminal ERROR record found for base_setup" ) 
+        return false, errors.New("ERROR record is dependency!") 
+    } 
+
+    var ok bool 
+    if Configdir, ok = recs["configdir" ]; !ok {
+        return false, errors.New("configdir missing!")
+    }
+
+    if Swapdir, ok = recs["swapdir" ]; !ok {
+        return false, errors.New("swapdir missing!")
+    }
+
+    if Target, ok = recs["target" ]; !ok {
+        return false, errors.New("target missing!")
+    }
+
+    if Buildname, ok = recs["buildname" ]; !ok {
+        return false, errors.New("buildname missing!")
+    }
+    if Builddir, ok = recs["build_dir" ]; !ok {
+        return false, errors.New("build_dir missing!")
+    }
+
+    Sourcedir = Builddir
+
+    Backupdir = Swapdir + "/base_backup_BUILD_" + Target
+    Logfiledir = Swapdir + "/rsync_log"
+
+    Debugln( fmt.Sprintf( "sourcedir = %v", Sourcedir ) )
+
+    //just ignore the NULL suffix, as a Dev machine was most likely matched 
+    null:="NULL"
+    var target_null_test string
+    if BypassTargetNull {
+        target_null_test = "" 
+    }else {
+        target_null_test = null
+    }
+        
+    if Target == "" || Target == target_null_test {
+        err := "target is NULL or empty." + 
+                "\n\tTerminating process" + 
+                "\n\tProbably running on the bare metal dev machine. this is a no-no. "
+        Errorln(err) 
+        return false , errors.New(err) 
+    }
+
+
+    Debugln(fmt.Sprintf( "ARG: debug: %v", Debug ))
+    Debugln(fmt.Sprintf( "ARG: run_mode = %v", RunMode))
+    Debugln(fmt.Sprintf( "ARG: force_yes = %v", ForceYes))
+    Debugln(fmt.Sprintf( "ARG: dry_run = %v, ", DryRun ))
+    Debugln(fmt.Sprintf( "ARG: bypass_target_null = %v" , BypassTargetNull))
+    Debugln(fmt.Sprintf( "TEST_PREFIX:  '%v' ", TEST_PREFIX ))
+
+    if DryRun {
+        Infoln( "Running in DRY-RUN mode for rsync, no changes saved!!!")
+    }
+
+    return true, nil
+
+} 
 // 
 // def get_command_lines(full_csv_path) 
 // 
@@ -1326,9 +1898,6 @@ DESCRIPTION
 //   return $force_yes
 // end
 // 
-// def _get_bypass_target_null()
-//   return $bypass_target_null
-// end
 // 
 // ###############################################################################
 // #                           Logic Start...
@@ -1336,10 +1905,6 @@ DESCRIPTION
 // 
 // $VERSION = "0.1.0"
 // 
-// #Hardcoded value to prefix the target destination for testing
-// #SET TO "" for the LIVE/REAL scenario testing
-// $TEST_PREFIX = '/home/troy/Downloads/ruby_test_mapcopy'
-// #$TEST_PREFIX = ''
 // 
 // mapcopy_csv_file="mapcopy_commands.csv"
 // 
@@ -1425,3 +1990,6 @@ DESCRIPTION
 // 
 // 
 // 
+
+
+
