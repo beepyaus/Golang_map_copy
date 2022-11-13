@@ -59,6 +59,8 @@ var Version string = "0.0.1"
 var TEST_PREFIX = "/home/troy/Downloads/golang_test_mapcopy"
 //TEST_PREFIX = ""
 
+var Mapcopy_csv_file="mapcopy_commands.csv"
+
 var Configdir string
 var Swapdir string 
 var Target string 
@@ -121,12 +123,6 @@ func main() {
         return 
     }
 
-    //fmt.Printf("Debug = %v:\n" , Debug ) 
-
-    Debugln("testing one two three")
-    Errorln("testing one two three")
-    Infoln("testing one two three")
-
     Infoln(fmt.Sprintf("terminate: %v", terminate))
     Infoln(fmt.Sprintf("dry_run: %v", DryRun), "underline") 
     Infoln(fmt.Sprintf("force_yes: %v", ForceYes))
@@ -143,49 +139,66 @@ func main() {
 
     splash(Version) 
 
-    //TODO
-    // if res , err := clean_backup_dir(Backupdir); err != nil {
-    //    Errorln("clean_backup_dir failure!") 
-    //    Errorln("clean_backup_dir: " + res ) 
-    //    return 
-    // }
+    if res , err := clean_backup_dir(Backupdir); err != nil {
+       Errorln("clean_backup_dir failure!") 
+       Errorln("clean_backup_dir: " + res ) 
+       return 
+    }
 
-    // if res , err := setup_logfile_dir(Logfiledir); err != nil {
-    //    Errorln("setup_logfile_dir failure!") 
-    //    Errorln("setup_logfile_dir: " + err.Error() ) 
-    //    Infoln( fmt.Sprintf("setup_logfile_dir result: %v ", res))
-    //    return 
-    // }
+    if res , err := setup_logfile_dir(Logfiledir); err != nil {
+       Errorln("setup_logfile_dir failure!") 
+       Errorln("setup_logfile_dir: " + err.Error() ) 
+       Infoln( fmt.Sprintf("setup_logfile_dir result: %v ", res))
+       return 
+    }
     
     webowner := get_webowner()
     Debugln("webowner: " + webowner) 
 
     map_copy("/root", false)
 
-// 
-// command_list, err = create_command_list($configdir, mapcopy_csv_file) 
-// unless err == nil 
-//   error "create_command_list failed!" 
-//   exit 5
-// end 
-// 
-// #TODO Need to decide if another ARGV is needed to proceed-on-error 
-// # or terminate of the first/any error and ignore the outstanding items in list.
-// 
-// unless true == result = process_commands(command_list)
-//   error "process_commands failed!"
-//   exit 6
-// end 
+// ################################### now obselete ############################################
+// # all these should be in the CSV file!
+// # keep for posterity / reference.
+// # simple_copy("/var/www/html/sites/default", false, webowner, webowner )  
+// # simple_copy("/var/www/html/sites/default_http" , false, webowner, webowner )  
+// # simple_copy("/var/www/html/sites/default_https" , false, webowner, webowner )  
+// # 
+// # map_copy("/etc/httpd/conf" , false )  
+// # map_copy("/etc/apache2" , false )  
+// # map_copy("/etc/postfix" , false )  
+// # map_copy("/etc/postgresql" , false )  
+// # map_copy("/etc/php" , false )  
+// # map_copy("/etc/php8" , false )  
+// # map_copy("/var/lib/postgres" , false )  
+// # map_copy("/var/lib/postgresql" , false )  
+// # map_copy("/root", false )  
+// # map_copy("/home/vagrant", false )  
+// # map_copy("/home/arch", false )  
+// # map_copy("/home/alpine", false )  
+// # map_copy("/etc/logrotate.d" , false )  
+// # 
+// # simple_copy("/etc/redis.conf" , false, 'redis', 'redis' )  
+// # simple_copy("/etc/ssl_self" , false, 'root', 'wheel' )  
+// # simple_copy("/etc/letsencrypt" , false, 'root', 'wheel' )  
+// # ##################################################################
+ 
+ 
+    if command_list, err := create_command_list(Configdir, Mapcopy_csv_file); err != nil { 
+        Say("ERROR: Failed to create command list!", "bold")
+       return 
+    }
+     
+    //TODO Need to decide if another ARGV is needed to proceed-on-error 
+    // or terminate of the first/any error and ignore the outstanding items in list.
+     
+    if r, err :=  process_commands(command_list); err != nil { 
+        Say( "ERROR: process_commands failed!", "bold") 
+       return 
+    } 
 
-}
+} //end main
 
-// type my_error struct {
-//     my_error_str string 
-// }
-// 
-// func (e *my_error) Error() string {
-//     return "my_error:: " + e.my_error_str
-// }
 
 func run_command(cmd *exec.Cmd) ( string, error)  {
 
@@ -812,150 +825,92 @@ func scan_source_dir(cur_dir string, level int) (bool, error) {
     return true, nil
 }
 
-// 
-// def scan_tree_simple( # {{{
-//         prev_path, 
-//         obj_cur_dir, 
-//         level, 
-//         parent_default_file_user="", 
-//         parent_default_file_group="", 
-//         parent_default_file_mode="") 
-// #take in a parsed HASH obj using the gem xmlsimple  
-// #navigate its Hash tree and map over to the original source structure 
-// 
-//     #walk thru array[] of Hash items for the <directory> xml element...
-//     #i think only ONE hash item it seems with either dir/file entries 
-//     info ""
-//     info "scan_tree_simple Starting..."
-//     info "\tprev_path: " + prev_path , true
-//     info "\tlevel: " + level.to_s
-//     info "\tparent_default_file_mode: " + parent_default_file_mode 
-//     info "\tparent_default_file_user: " + parent_default_file_user
-//     info "\tparent_default_file_group: " + parent_default_file_group
-// 
-//     unless obj_cur_dir.is_a?(Array) then 
-//         error ("\tinput dir for scanning NOT an array!\t level: #{level}")
-//         return false
-//     end
-// 
-//     for h in obj_cur_dir 
-// 
-//         unless h.is_a?(Hash) then 
-//             error( "\titem inside directory array NOT a hash! class type: #{ h.class}  ")
-//             return false 
-//         end
-// 
-//         cur_path = h['name'] 
-//         info "\tcur_path: #{cur_path}", true
-// 
-//         #either it's own settings or go to the parents value . so it trickles down ...  
-//         default_file_mode = h['default_file_mode'] ||= parent_default_file_mode
-//         default_file_user = h[ 'default_file_user' ] ||= parent_default_file_user
-//         default_file_group = h['default_file_group'] ||= parent_default_file_group
-// 
-//         info( "\tdefault_file_mode = #{default_file_mode}")
-//         info( "\tdefault_file_user = #{default_file_user}")
-//         info( "\tdefault_file_group  = #{default_file_group}")
-// 
-//         joined_path = prev_path + cur_path + "/" 
-//         debug("\tnew joined_path: " + joined_path ) 
-//         $fileMap[joined_path] = file_data( level, "d", h['user'], h['group'] , h['mode'] , 
-//                                 default_file_user, default_file_group, default_file_mode)
-//         debug "fileMap key insert <DIR> '" + joined_path + "'", true
-//         #the list of files ONLY. directories have their OWN array...
-//         if h.has_key?('file') then 
-//             file_list = h['file'] 
-//             for f in file_list 
-//                 unless f.is_a?(Hash) then 
-//                     error( "\titem inside file array NOT a hash! class type: #{f.class}  ")
-//                     return false 
-//                 end
-//                 
-//                 hash_key = joined_path + f[ "name" ] 
-//                 info "\tfileMap key insert <FILE> '" + hash_key + "' " , true
-//                 $fileMap[hash_key] = file_data( level, 'f' , f[ 'user' ] , f[ 'group' ] , f[ 'mode' ] ,
-//                                          default_file_user , default_file_group , default_file_mode )
-//             end
-//         end
-// 
-//         if h.has_key?('directory') then 
-//             next_child_dirs = h['directory'] 
-//             info "\trecursing into next dir..."
-//             result = scan_tree_simple(joined_path, next_child_dirs, level+1, default_file_user, default_file_group, default_file_mode)
-//             unless result 
-//                 error("scan_tree_simple returned false, under : " + joined_path)
-//                 return false
-//             end 
-//         end
-// 
-//     end 
-// 
-//     return true
-// 
-// end # }}}
-// 
-// def empty_or_nil?(p)# {{{
-//     if p.nil? then 
-//        return true 
-//     end 
-//     #TODO: assumes empty prop; test for Int/num etc 
-//     if p.empty? then 
-//         return true
-//     end
-// 
-//     return false
-// end# }}}
-// 
-// def simple_copy(path_dir="", delete=false, user=nil, group=nil )# {{{
-//     #simple rsync version just for default-website for e.g , no xml tree etc 
-//     #and signular file transfer 
-//    
-//     source = $sourcedir + path_dir
-//     debug "simple_copy: source: '#{ source }' ", true
-// 
-//     target = $TEST_PREFIX + path_dir 
-//     debug "simple_copy: target: '#{target}' " , true
-// 
-//     if File.exist?(source) == false then 
-//         error( "\tsimple_copy: Terminating: '#{ source }' does not exist!")
-//         return false 
-//     end 
-// 
-//     if Dir.exist?(source) then 
-//         # Add the slash to start copying the contents that follows the end dir and NOT the dir itself
-//         source += "/"
-//         #CAUTION: OpenBSD does not do -v on mkdir!!
-//         mkdir = "mkdir -p #{target}"
-//         debug("\tcommand call: '#{mkdir}'") 
-//         res = %x( #{mkdir} )
-//         debug( "\tsimple_copy: mkdir -p #{target}  result: '#{res}' ")
-//     end 
-// 
-//     logfile_part = path_dir
-//     logfile_part = logfile_part.gsub(/\// , "_") 
-// 
-//     rsync_dryrun = _get_dry_run() ? " --dry-run" : "" 
-//     if empty_or_nil?(user) || empty_or_nil?(group) then 
-//         user ||= ""
-//         group ||= ""
-//         debug "warning!!! user or group nil/empty" 
-//         debug "\t user: " + user.to_s 
-//         debug "\t group: " + group.to_s
-//     end 
-//     rsync_chown = ( empty_or_nil?(user) || empty_or_nil?(group) ) ? "" : " --chown #{user}:#{group}"
-//     rsync_delete = delete ? " --delete" : "" 
-//     rsync_backup = " --backup --backup-dir=#{$backupdir}#{path_dir}"
-//     rsync_logfile = " --log-file=#{$logfiledir}/#{ logfile_part }_#{ Time.now.to_i }.log"
-//     rsync_switches = "#{rsync_dryrun} -v -a --human-readable#{rsync_delete}#{rsync_chown}#{rsync_backup}#{rsync_logfile}"
-//     rsync_call = "rsync#{rsync_switches} #{source} #{target} "
-//     
-//     debug( "rsync call to be run: '#{rsync_call}' ")
-//     result = %x( #{rsync_call} )
-//     debug "simple_copy: rsync result: #{result} "
-//     return true
-// 
-// end# }}}
-// 
+ 
+func simple_copy(path_dir string, delete_outsiders bool, user string , group string  ) (bool, error)  { 
+//simple rsync version just for default-website for e.g , no xml tree etc 
+//and signular file transfer 
+   
+    source_tmp := Sourcedir + path_dir
+    Debugln(  "simple_copy: source: '" + source +  "' ", "bold")
+
+    target := TEST_PREFIX + path_dir 
+    Debugln( "simple_copy: target: '" + target + "' " , "bold")
+
+
+    var res fs.FileInfo 
+    var err error 
+    var source string 
+    if res, err = os.Stat( source_tmp ); err != nil {
+        Errorln( fmt.Sprintf("\tsimple_copy: Terminating: source: %v does not exist!", source_tmp ))
+        Errorln( "error: " + err.Error()) 
+        return false, err
+    }
+
+    if res.IsDir() {
+        // Add the slash to start copying the contents that follows the end dir and NOT the dir itself
+        source = source_tmp + "/" 
+        //CAUTION: OpenBSD does not do -v on mkdir!!
+        cmd := exec.Command("mkdir", "-p", target) 
+        if r, err := run_command(cmd); err != nil { 
+            return false, err
+        }
+    } else {
+        source = source_tmp 
+    }
+    
+
+    logfile_part := strings.Replace(path_dir,"/", "_", -1) 
+
+    r_args := []string 
+    if DryRun {
+        r_args = append(r_args, "--dry-run") 
+    }
+
+    r_args = append(r_args, "-v") 
+    r_args = append(r_args, "-a") 
+    r_args = append(r_args, "--human-readable") 
+    if delete_outsiders { 
+        r_args = append(r_args, "--delete" ) 
+    }
+    if user != "" && group != "" { 
+        //if ANY empty -then all must be emtpy
+        r_args = append(r_args, fmt.Sprintf("--chown %v:%v", user, group) 
+    }else {
+        Infoln("warning!! user or group empty!") 
+    }
+    r_args = append(r_args, "--backup") 
+    r_args = append(r_args, fmt.Sprintf("--backup-dir=%v%v", Backupdir, path_dir) )
+
+    time_now := Time.Now().Unix()
+    r_args = append( r_args, fmt.Sprintf("--log-file=%v/%v_%v.log",Logfiledir, logfile_part, time_now ))
+
+    r_args = append(r_args, source ) 
+    r_args = append(r_args, target ) 
+    
+    cmd_rsync := exec.Command("rsync") 
+    cmd_rsync.Args = r_args
+    for _, a := range cmd_rsync.Args {
+        Debugln("rsync Arg: " + a ) 
+    }
+
+    if r, err := run_command(cmd_rsync); err != nil { 
+        Debugln("rsync command failure! : " + r) 
+        return false, err
+    } else {
+        Debugln("rsync 'non error' return: " + r )
+    }
+
+    //all good if arrived here. 
+    Infoln("rsync completed okay!")
+    return true, nil
+    
+    debug( "rsync call to be run: '#{rsync_call}' ")
+    result = %x( #{rsync_call} )
+    debug "simple_copy: rsync result: #{result} "
+    return true
+
+}
+ 
 func get_webowner() string  { 
     p := get_platform()
     if strings.Contains(p, "Alpine") {
@@ -967,7 +922,6 @@ func get_webowner() string  {
     } 
 }
 
- 
 func map_copy(path_dir string, delete_outsiders bool) (bool, error) {
 //  open a xml tree spec to get mode/user/group etc 
 //  recurse into all directory elements to get all file elements etc 
@@ -1781,236 +1735,115 @@ func parse_simple_cmd(cmd []string) (Command, error) {
  
 } 
  
-// def parse_mapcopy_cmd(cmd)
+func parse_mapcopy_cmd(cmd []string ) (Command, error) {
 // 
 // # m,"/etc/httpd/conf" , false
 // # remember - the first element SHOULD of been shifted!
 // 
-//   if cmd.size < 2 then 
-//     return nil, "array size less than 2"
-//   end 
-// 
-//   pos_path=0
-//   pos_delete=1
-// 
-//   if false == param_path = parse_path(cmd[pos_path] ||= "") then 
-//     return nil, "position #{pos_path} is an invalid path." 
-//   end
-// 
-//   if false == param_delete = parse_bool(cmd[pos_delete] ||= "") then 
-//     return nil, "position #{pos_delete} is not a bool"
-//   else
-//     param_delete = convert_bool(param_delete) #convert after guard,
-//   end
-// 
-//  
-//   command = { 
-//     "type" => "mapcopy", 
-//     "path" => param_path, 
-//     "delete" => param_delete, 
-//   }
-// 
-//   return command, false
-// 
-// end
-// 
-// def parse_command(cmd)
-// 
-//   action = cmd.shift
-//   action = action.strip
-//   
-//   unless action == "s" || action  == "m"
-//     return false
-//   end
-// 
-//   command = false
-//   err = false
-// 
-//   if action == "s" then 
-//     command, err = parse_simple_cmd(cmd)
-//   elsif action == "m" then 
-//     command, err = parse_mapcopy_cmd(cmd)
-//   else 
-//     err = "unknown option" 
-//   end 
-// 
-//   return command, err
-// 
-// end 
-// 
-// 
-// def create_command_list(config_dir, command_csv_file)
-// #push good parsed commands to the array 
-// 
-//   full_path = config_dir + "/" + command_csv_file 
-//   lines = get_command_lines(full_path) 
-//   unless lines 
-//     error "get_command_lines failed!" 
-//     return nil, false
-//   end 
-// 
-//   debug "command lines: " + lines.to_s
-// 
-//   delim = ","
-//   command_list = Array.new
-// 
-//   for x in lines
-//       command, err = parse_command( x.split(delim) )
-//       if err then 
-//         error "failed to parse command!"
-//         error "\t" + err.to_s
-//         return nil, false
-//       end 
-//       command_list.push(command)  
-//   end
-// 
-//   return command_list, nil
-// 
-// end 
-// 
-// def process_commands(command_list)
-// 
-//   unless command_list.is_a?(Array) 
-//     error "command_list not an Array!"
-//     return -1
-//   end 
-// 
-//   if command_list.size == 0 then 
-//     error "command_list size zero!"
-//     return -1
-//   end 
-// 
-//   for c in command_list 
-// 
-//     result = false
-// 
-//     if c['type'] == "simple" then 
-//       debug "COMMAND:: path: " +  c['path'] 
-//       debug "COMMAND:: " + c.to_s 
-//       result = simple_copy(c['path'], c['delete'], c['user'] , c['group']) 
-// 
-//     elsif c['type'] == "mapcopy" then 
-//       debug "COMMAND:: path: " + c['path'] 
-//       debug "COMMAND:: " + c.to_s
-//       result = map_copy(c['path'], c['delete']) 
-//     end
-// 
-//     unless result 
-//       error "call failure with simple_copy or map_copy command!" 
-//       return false
-//     end 
-// 
-//   end #endfor
-// 
-//   info "processed commands okay!", true
-//   return true
-// end 
-// 
-// 
-// def _get_dry_run() 
-//   return $dry_run
-// end 
-// 
-// def _get_debug() 
-//   return $debug
-// end 
-// 
-// def _get_force_yes()
-//   return $force_yes
-// end
-// 
-// 
-// ###############################################################################
-// #                           Logic Start...
-// ###############################################################################
-// 
-// $VERSION = "0.1.0"
-// 
-// 
-// mapcopy_csv_file="mapcopy_commands.csv"
-// 
-// terminate, $dry_run, $force_yes, $run_mode, $bypass_target_null, $debug = set_args() 
-// if terminate 
-//     #use at bash/sh, echo $? to show the result
-//     info "terminating process (set_args)"
-//     exit 1
-// end
-// 
-// splash($VERSION)
-// 
-// 
-// unless 0 == result = set_globals() then 
-//     error "set_globals() failure" 
-//     exit 2
-// end
-// 
-// ###########TODO
-// #testing the reshuffle of global vars. 
-// #remove once confident. 
-// 
-// unless clean_backup_dir($backupdir)
-//     error "clean_backup_dir() call failure" 
-//     exit 3
-// end 
-// 
-// unless 0 == x = setup_logfile_dir($logfiledir) 
-//     error "setup_logfile_dir() call failure" 
-//     exit 4
-// end 
-// 
-// webowner = get_webowner()
-// debug("webowner: #{webowner}") 
-// 
-// 
-// command_list, err = create_command_list($configdir, mapcopy_csv_file) 
-// unless err == nil 
-//   error "create_command_list failed!" 
-//   exit 5
-// end 
-// 
-// #TODO Need to decide if another ARGV is needed to proceed-on-error 
-// # or terminate of the first/any error and ignore the outstanding items in list.
-// 
-// unless true == result = process_commands(command_list)
-//   error "process_commands failed!"
-//   exit 6
-// end 
-// 
-// 
-// exit 0 #zero is unix success. 
-// __END__
-// 
-// #################### now obselete.......
-// # all these should be in the CSV file!
-// # keep for posterity / reference.
-// # simple_copy("/var/www/html/sites/default", false, webowner, webowner )  
-// # simple_copy("/var/www/html/sites/default_http" , false, webowner, webowner )  
-// # simple_copy("/var/www/html/sites/default_https" , false, webowner, webowner )  
-// # 
-// # map_copy("/etc/httpd/conf" , false )  
-// # map_copy("/etc/apache2" , false )  
-// # map_copy("/etc/postfix" , false )  
-// # map_copy("/etc/postgresql" , false )  
-// # map_copy("/etc/php" , false )  
-// # map_copy("/etc/php8" , false )  
-// # map_copy("/var/lib/postgres" , false )  
-// # map_copy("/var/lib/postgresql" , false )  
-// # map_copy("/root", false )  
-// # map_copy("/home/vagrant", false )  
-// # map_copy("/home/arch", false )  
-// # map_copy("/home/alpine", false )  
-// # map_copy("/etc/logrotate.d" , false )  
-// # 
-// # simple_copy("/etc/redis.conf" , false, 'redis', 'redis' )  
-// # simple_copy("/etc/ssl_self" , false, 'root', 'wheel' )  
-// # simple_copy("/etc/letsencrypt" , false, 'root', 'wheel' )  
-// # ##################################################################
-// 
-// 
-// #goodbye. 
-// 
-// 
-// 
 
+pos_path:=0
+pos_delete:=1
+
+if len(cmd) < 2 {
+    return nil,  errors.New("array size less than 2! wrong size.") 
+} 
+
+c := new(Command) 
+c.c_type = "mapcopy" 
+
+if p, err := parse_path(cmd[pos_path]); err != nil { 
+     return nil, errors.New( fmt.Sprintf( "position %v is not a valid path.",pos_path )) 
+}else {
+    command.c_path = p
+}
+
+if p, err := parse_delete(cmd[pos_delete]); err != nil { 
+     return nil, errors.New( fmt.Sprintf( "position %v is not a valid boolean.",pos_delete )) 
+}else {
+    command.c_delete = convert_bool(p) //convert after guard,
+}
+ 
+ 
+return command, nil 
+ 
+}
+
+func parse_command(cmd []string ) (Command, error) {
+
+a = cmd[:1] 
+action = strings.TrimSpace(a)
+
+if !( action == "s" || action == "m") {
+    return nil, errors.New("cannot parse action from command array") 
+}
+
+if action == "s" { 
+   if  command, err := parse_simple_cmd(cmd[1:]); err != nil {
+        return nil, err 
+   }else {
+        return command, nil 
+   }
+} else if action == "m" {
+    if command, err := parse_mapcopy_cmd(cmd[1:]); err != nil { 
+        return nil, err
+    } else {
+        return command, nil 
+    }
+} else {
+    return nil, errors.New("Unknown action")
+} 
+ 
+return command, err
+ 
+} 
+ 
+ 
+func create_command_list(config_dir string, command_csv_file string ) ([]Command, error)  { 
+//push good parsed commands to the array 
+ 
+full_path := config_dir + "/" + command_csv_file 
+if lines, err := get_command_lines(full_path); err != nil { 
+    return nil, err
+}
+
+command_list := make([]Command) 
+
+for i, row := range records { 
+    if command, err := parse_command( row ); err != nil { 
+        return nil, err
+    } 
+    command_list = append(command_list, command)
+}
+
+  return command_list, nil
+} 
+
+func process_commands(command_list []Command ) (bool, error) {
+
+    if len(command_list) == 0 { 
+        return nil, errors.New("command list size zero!") 
+    }
+     
+    for i, c := range command_list { 
+        if c.c_type == "simple" {
+            Debugln( "COMMAND:: simple:  path: " +  c.c_path  )
+            if result , err := simple_copy(c.c_path, c.c_delete, c.c_user , c.c_group); err != nil { 
+                return nil, err
+            }
+
+        } else if c.c_type == "mapcopy" {
+            Debugln( "COMMAND:: mapcopy: path: " + c.c_path )
+            if result , err := map_copy(c.c_path, c.c_delete); err != nil { 
+                return nil , err 
+            }
+        } else {
+            return nil, errors.New("command neither simple or mapcopy: " + c.c_type)
+        }
+
+    }
+     
+    Infoln( "processed commands okay!")
+    return true, nil 
+} 
 
 
