@@ -14,9 +14,11 @@ import (
 "regexp"
 "encoding/xml"
 "strconv"
+"time" 
 )
 
-// 
+// NOTE: 'st' terminal (Suckless) did NOT pickup the proper formatting of comments for some reason. 
+//        Alacritty seems fine as of Sun 13 Nov 2022 13:00:24
 // #############################################################################################################
 // # part 1. 
 // #   - should of copied (unix cp) the base and specific base_variant dir into the /tmp swap dir
@@ -181,6 +183,8 @@ func run_command(cmd *exec.Cmd) ( string, error)  {
     var out bytes.Buffer
     var errout bytes.Buffer
 
+    //TODO: an err may NOT happen and 
+    // the stderr output probabaly should be processed etc better
     cmd.Stderr = &errout
     cmd.Stdout = &out 
 
@@ -234,7 +238,7 @@ func get_log_level(level string) int {
 func set_args() ( bool, bool, bool, string, bool, int ) {
 // when terminate < 0 the handler NEEDS to kill this process!!!!!
 // - shift will pop first element and move the whole array to the left. 
-//NOTE: MAYBE cause it is  'go run .." but the vars did NOT seem to be set correctly! 
+//NOTE: MAYBE cause it is  "go run .." but the vars did NOT seem to be set correctly! 
 // ..I refreshed a few times and then it worked. but I swear the code was right. 
     
     var help bool
@@ -281,9 +285,9 @@ func set_args() ( bool, bool, bool, string, bool, int ) {
 
     return terminate, dry_run, force_yes, run_mode, bypass_target_null, log_level
 
-    //-------------------------------OR----------------------------------
-    //this does work , but the 'flag' package SEEMS to work. 
-    //commented out as Go doesnt like vars no used ...like Rust I s'pose
+//-------------------------------OR----------------------------------
+//this does work , but the 'flag' package SEEMS to work. 
+//commented out as Go doesnt like vars no used ...like Rust I suppose
     //args := os.Args
 
     // for ; len(args) > 0 ;  {
@@ -518,8 +522,8 @@ func get_base() (map[string]string, error) {
     Infoln(" prog = " + prog ) 
 
 
-//    #CAUTION: linux 'dirname' allows a -z to append a NULL char and NOT a \n 
-//    #but no option in OpenBSD
+//CAUTION: linux 'dirname' allows a -z to append a NULL char and NOT a \n 
+//but no option in OpenBSD
     cmd := exec.Command("dirname", prog)
     runtime_path, err := run_command(cmd) 
     if err != nil {
@@ -995,12 +999,9 @@ func map_copy(path_dir string, delete_outsiders bool) (bool, error) {
     Infoln( fmt.Sprintf( "XML Spec Tree: '%v'", file_name))
 
 
-    //spec_fileinfo, err := os.Stat( file_name )
     if _ , err := os.Stat( file_name ); err != nil {
-        //if errors.Is(spec_err, fs.PathError) {
             Errorln( fmt.Sprintf("file_name: %v does not exist!", file_name ))
             return false, err
-        //}
     }
 
     if _, err := scan_tree_firehose(file_name); err != nil {
@@ -1279,12 +1280,7 @@ func copy_source_files(path_dir string, delete_outsiders bool) (bool, error) {
             v.file_mode ))
               
         //CAUTION!!! chmod NEEDS OCTAL value! not string, or decimal!!!
-        //r1 = sprintf("%04o", m & 07777) #perls code
-        //o_mode = sprintf("%o",  m ).to_i(8) & 07777
-        //o_mode = sprintf("%d",  m ).to_i(10)
-
         m := v.file_mode
-
         if o_mode, err := strconv.ParseUint(m,8,32); err != nil {
             Errorln("file_mode didnot parse okay!") 
             return false, err
@@ -1292,11 +1288,11 @@ func copy_source_files(path_dir string, delete_outsiders bool) (bool, error) {
             var fmode fs.FileMode
             fmode = fs.FileMode(o_mode)
             Debugln( fmt.Sprintf("mode (oct): %v ", fmode ))
-            Debugln("Stubbed CHMOD!") 
-            //if err := os.Chmod(source_file, fmode) ; err != nil{
-            //    Errorln( "File: '" + source_file + "' did not chmod" )
-            //    return false, err
-            //}
+            //Debugln("Stubbed CHMOD!") 
+            if err := os.Chmod(source_file, fmode) ; err != nil{
+                Errorln( "File: '" + source_file + "' did not chmod" )
+                return false, err
+            }
         }
 
         glist, err := get_etc_group()
@@ -1313,55 +1309,30 @@ func copy_source_files(path_dir string, delete_outsiders bool) (bool, error) {
 
         var gid int 
         var has_gid bool 
-        if gid, has_gid = glist[g]; !has {
+        if gid, has_gid = glist[g]; !has_gid {
             g_notfound_err := errors.New("group name not found:" + g)
-            return nil , g_notfound_err
+            return false , g_notfound_err
         }
 
         var uid int 
         var has_uid bool 
-        if uid, has_uid = ulist[u]; !has {
+        if uid, has_uid = ulist[u]; !has_uid {
             u_notfound_err := errors.New("user name not found:" + g)
-            return nil , u_notfound_err
+            return false , u_notfound_err
         }
         
 
         Debugln( fmt.Sprintf( "user:%v, uid:%v", u, uid ))
         Debugln( fmt.Sprintf( "group:%v, gid:%v", g, gid ))
 
-        Debugln("STUBBED CHOWN!!") 
-        // if err := os.Chown(source_file, uid, gid) ; err != nil{
-        //     Errorln( "File: '" + source_file + "' did not chown correctly." )
-        //     return false, err
-        // }
+        //Debugln("STUBBED CHOWN!!") 
+         if err := os.Chown(source_file, uid, gid) ; err != nil{
+             Errorln( "File: '" + source_file + "' did not chown correctly." )
+             return false, err
+         }
 
     }
 
-    //replace / with _  
-    logfile_part = strings.Replace( path_dir, "/", "_", -1) 
-
-    var rsync_dryrun string 
-    if DryRun {
-        rsync_dryrun = "--dry-run " 
-    }else {
-        rsync_dryrun = "" 
-    }
-
-    time_now := ""
-    rsync_switches := fmt.Sprintf( "%v-a --human-readable --verbose", rsync_dryrun ) 
-    rsync_backup := fmt.Sprintf( "--backup --backup-dir=%v%v", Backupdir, path_dir)
-    rsync_logfile := fmt.Sprintf( " --log-file=%v/%v_%v.log",
-                        Logfiledir, 
-                        logfile_part,
-                        time_now ) 
-
-    var rsync_delete string 
-    if delete_outsiders { 
-        rsync_delete = " --delete" 
-    } else { 
-        rsync_delete = ""
-    }
-     
     //prefix normally /home/foo/Downloads/perl_test to safeguard against overcopy.
     target_dir := TEST_PREFIX + path_dir
     Debugln("target_dir: " + target_dir)
@@ -1369,33 +1340,49 @@ func copy_source_files(path_dir string, delete_outsiders bool) (bool, error) {
     //CAUTION: OpenBSD does not do -v for mkdir 
     cmd_mkdir := exec.Command("mkdir", "-p", target_dir ) 
     if r, err := run_command(cmd_mkdir); err != nil {
+        Debugln("mkdir response:" + r) 
        return false, err 
     }
-    
+    time_now := time.Now().Unix()
+    cmd_rsync := exec.Command("rsync") 
+    var rsync_args []string 
+    logfile_part := strings.Replace( path_dir, "/", "_", -1) 
+
+    if DryRun {
+        rsync_args = append(rsync_args, "--dry-run")
+    }
+    rsync_args = append(rsync_args, "-a" )
+    rsync_args = append(rsync_args, "--human-readable" )
+    rsync_args = append(rsync_args, "--verbose" )
+    if delete_outsiders { 
+        rsync_args = append(rsync_args, "--delete" )
+    }
+    rsync_args = append(rsync_args, "--backup" )
+    rsync_args = append(rsync_args, "--backup-dir=" + Backupdir + path_dir  )
+    rsync_args = append(rsync_args, fmt.Sprintf( "--log-file=%v/%v_%v.log", Logfiledir, logfile_part, time_now ))
     // IMPORTANT! use the trailing  '/' at end of rsync source to avoid starting at the dir, ..so to get contents of the dir.
+    rsync_args = append(rsync_args, Sourcedir + path_dir + "/"  )
+    rsync_args = append(rsync_args, target_dir )
+
     // TODO: Rust's version FAILS when extra blank space chars are between args. Dbl check here. 
-    //  ...rsync main.c (1492) err or something. 
-    //rsync_call := "rsync #{rsync_switches}#{rsync_delete}#{rsync_backup}#{rsync_logfile} #{$sourcedir}#{path_dir}/ #{target_dir}"
-    rsync_call := fmt.Sprintf( "rsync %v%v%v %v %v%v/ %v", 
-                        rsync_switches, 
-                        rsync_delete, 
-                        rsync_backup, 
-                        rsync_logfile, 
-                        Sourcedir, 
-                        path_dir, 
-                        target_dir)
-
-    Debugln( "calling: " + rsync_call )
-
-    // res = %x( #{rsync_call} )
-    // debug( "rsync result : '#{res}' " )
     // #TODO parse the stdout response!!!
     // # this assumes it ran okay!
 
-    // return true 
+    cmd_rsync.Args = rsync_args 
+    for _, a := range cmd_rsync.Args {
+        Debugln("rsync Arg: " + a ) 
+    }
 
+    if r, err := run_command(cmd_rsync); err != nil { 
+        Debugln("rsync command failure! : " + r) 
+        return false, err
+    } else {
+        Debugln("rsync non-err return: " + r )
+    }
+
+    //all good if arrived here. 
+    Infoln("rsync completed okay!")
     return true, nil
-
 }
  
 func show_prelim(this_is_re_show bool) (bool, error)  {
