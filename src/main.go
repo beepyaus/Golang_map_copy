@@ -13,6 +13,7 @@ import (
 "errors"
 "regexp"
 "encoding/xml"
+"encoding/csv"
 "strconv"
 "time" 
 )
@@ -72,6 +73,14 @@ var RunMode string
 var BypassTargetNull bool 
 var Debug int //really log_level
 
+type Command struct {
+//c_ only cause some are reserved words .
+    c_type string 
+    c_path string 
+    c_delete bool 
+    c_user string 
+    c_group string 
+}
 type FileData struct {
     node string //'name' attr in XML spec. added cause of firehose model
     file_level int
@@ -965,13 +974,10 @@ func map_copy(path_dir string, delete_outsiders bool) (bool, error) {
 //  populate the hash tree with the full file path for easy lookup 
 //  pass over to copysourcefiles with delete param for rsync to decide if to rm extra files NOT in source dir.  
 
-    //path_dir_fileinfo, err := os.Stat( path_dir )
     if _, err := os.Stat( path_dir ); err != nil {
-        //if errors.Is(err, fs.PathError) {
-            Errorln( fmt.Sprintf("path_dir: %v does not exist!", path_dir ))
-            Errorln( "error: " + err.Error()) 
-            return false, err
-        //}
+        Errorln( fmt.Sprintf("path_dir: %v does not exist!", path_dir ))
+        Errorln( "error: " + err.Error()) 
+        return false, err
     }
 
     //TODO: turn into params , 
@@ -1597,156 +1603,184 @@ func set_globals() (bool , error) {
     return true, nil
 
 } 
+ 
+func get_command_lines(full_csv_path string) ([][]string, error) {
+
+    if _, err := os.Stat( full_csv_path ); err != nil {
+        Errorln( fmt.Sprintf("full_csv_path: %v does not exist!", full_csv_path ))
+        Errorln( "error: " + err.Error()) 
+        return nil, err
+    }
+
+    var file os.File  
+    var file_err error
+    if file, file_err = os.Open(full_csv_path) ; file_err != nil { 
+        Errorln( "cannot open file: " + full_csv_path ) 
+        return nil, file_err
+    }
+
+    r := csv.NewReader(file)
+	r.Comma = ','
+	r.Comment = '#'
+	records, err := r.ReadAll()
+
+    if len(records) == 0 {
+      Errorln( "all empty command lines!") 
+      return nil, errors.New("All empty Command lines in file!") 
+    } 
+
+    for _, line := range records { 
+        fmt.Println("")
+        fmt.Print("Rec:: ") 
+        for _, col :=range line {
+            fmt.Print(col + ",") 
+        }
+    }
+    
+    return records, nil 
+} 
+ 
+func lookup_user(p string) string {
+//TODO Etc call
+   return p
+}
+ 
+func lookup_group(p string) string {
+   //TODO Etc call
+   return p
+}
+ 
+func parse_path(path string) (string, error) {
+    p := strings.TrimSpace(path) 
+
+    if p == "/" { 
+        Errorln( "path is root!" ) 
+        return "", errors.New("Path is root!")
+    } 
+
+  //TODO regex for url/path
+    return p, nil //# or false
+}
+
+func parse_bool(_p string) (string, error) {
+    p = strings.TrimSpace(_p)
+    if !(p == "true" || p == "false"){ 
+        return "", errors.New("value neither true or false") 
+    }
+    return p, nil  //return the STRING
+}
+
+func convert_bool(p string ) bool { 
+    if p == "true" { 
+        return true
+    } 
+    return false
+}
+
+func parse_user(_p string) (string, error) { 
+    p = strings.TrimSpace(_p) 
+
+    if p == "" { 
+        return "", errors.New("empty user given!") 
+    }
+
+    var new_user string 
+    if p == "<webowner>" {
+        new_user = get_webowner()
+    }else{
+        new_user = p 
+    }
+
+    if ulook, err := lookup_user(new_user); err != nil { 
+        return "", err 
+    } else { 
+        return ulook, nil 
+    }
+
+    return "", errors.New("invalid parse_user outcome.")
+
+}
+
+func parse_group(_p string) (string,error) {
+  
+    p = strings.TrimSpace(_p)
+    if p == "" {
+        return "", errors.New("empty group param.") 
+    }
+
+    var new_g string 
+
+    if p == "<webowner>" {
+        new_g = get_webowner()
+    }else {
+        new_g = p 
+    }
+
+    if look_g, err := lookup_group(new_g); err != nil { 
+        return "", err
+    }else {
+        return look_g, nil
+    }
+
+    return "", errors.New("invalid outcome") 
+
+}
+
+func parse_simple_cmd(cmd []string) (Command, error) { 
+//attempt simple_copy parse 
+ 
+// s,"/var/www/html/sites/default", false, <webowner>, <webowner>
+// remember! the first element was SHIFTed , so s is gone!
 // 
-// def get_command_lines(full_csv_path) 
-// 
-//     unless File.exist?(full_csv_path) 
-//         error "command file missing!\n\tpath: " + full_csv_path
-//         return false
-//     end
-// 
-//     lines = [] 
-// 
-//     File.open(full_csv_path, "r") { |file|
-//         while file.eof? == false do 
-//             x = file.readline
-//             # find any hashcomment starting a line OR any blank line 
-//             unless x =~ /\s*#.*|^\s*$/
-//                  lines.push(x)
-//             end
-//         end 
-//     }
-// 
-//     if lines.empty? then 
-//       error "all empty command lines!"
-//       return false
-//     end 
-// 
-//     return lines
-// 
-// #     for x in lines 
-// #         puts "line::" + x
-// #     end
-// # 
-// end 
-// 
-// def lookup_user(p)
-//   #todo Etc call
-//   return p
-// end
-// 
-// def lookup_group(p)
-//   #todo Etc call
-//   return p
-// end
-// 
-// def parse_path(p)
-//   p = p.strip 
-//   if p == "/" then 
-//     error "path is root!" 
-//     return false
-//   end 
-// 
-//   #TODO regex for url/path
-//   return p # or false
-// end
-// 
-// def parse_bool(p) 
-//    p = p.strip
-//    unless p == "true" || p == "false" 
-//      return false
-//    end
-//    return p.to_s  #return the STRING
-// end
-// 
-// def convert_bool(p)
-//   return  p == "true" ? true : false
-// end
-// 
-// def parse_user(p) 
-//   
-//   p = p.strip 
-//   if empty_or_nil?(p) then 
-//     return false
-//   end
-// 
-//   if p == "<webowner>" then
-//     p = get_webowner()
-//   end
-// 
-//   if false == p = lookup_user(p) then 
-//     return false
-//   end
-// 
-//   return p 
-// 
-// end
-// 
-// def parse_group(p) 
-//   
-//   p = p.strip  
-//   if empty_or_nil?(p) then 
-//     return false
-//   end
-// 
-//   if p == "<webowner>" then
-//     p = get_webowner()
-//   end
-// 
-//   if false == p = lookup_group(p) then 
-//     return false
-//   end
-// 
-//   return p 
-// 
-// end
-// 
-// def parse_simple_cmd(cmd)
-// #attempt simple_copy parse 
-// 
-// #s,"/var/www/html/sites/default", false, <webowner>, <webowner>
-// #remember! the first element was SHIFTed , so s is gone!
-// 
-//   debug "cmd: " + cmd.to_s
-// 
-//   if cmd.size < 4 then 
-//     return nil, "array size less than 4"
-//   end 
-//   pos_path=0
-//   pos_delete=1
-//   pos_user=2
-//   pos_group=3
-// 
-//   if false == param_path = parse_path(cmd[pos_path] ||= "") then 
-//     return nil, "position #{pos_path.to_s} is not a valid path." 
-//   end
-// 
-//   if false == param_delete = parse_bool(cmd[pos_delete] ||= "") then 
-//     return nil, "position #{pos_delete.to_s} is not valid a bool"  
-//   else
-//     param_delete = convert_bool(param_delete) #convert after guard,
-//   end
-// 
-//   if false ==  param_user = parse_user(cmd[pos_user]) then 
-//     return nil, "position #{pos_user.to_s} is not a valid user" 
-//   end
-// 
-//   if false ==  param_group = parse_group(cmd[pos_group]) then 
-//     return nil, "position #{pos_group} is not a group"
-//   end
-//   
-//   command = { 
-//     "type" => "simple", 
-//     "path" => param_path, 
-//     "delete" => param_delete, 
-//     "user" => param_user, 
-//     "group" => param_group
-//   }
-// 
-//   return command, false
-// 
-// end 
-// 
+    Debugln("cmd: + cmd") 
+ 
+    if len(cmd) < 4 {
+        return nil, "array size less than 4"
+    } 
+    pos_path:=0
+    pos_delete:=1
+    pos_user:=2
+    pos_group:=3
+ 
+    command := new(Command)
+    command.c_type = "simple"
+
+    for i, v := range cmd { 
+        
+        switch i {
+            case pos_path;
+                if param_path, err := parse_path(cmd[pos_path]); err != nil { 
+                     return nil, errors.New( fmt.Sprintf( "position %v is not a valid path.",pos_path )) 
+                }else {
+                    command.c_path = param_path 
+                }
+            case pos_delete; 
+                if param_del, err := parse_bool(cmd[pos_delete]); err != nil { 
+                     return nil, errors.New( fmt.Sprintf( "position %v is not a valid boolean.",pos_delete )) 
+                }else {
+                    command.c_delete = convert_bool(param_del) //convert AFTER guard. 
+                }
+            case pos_user; 
+                if param_user, err := parse_user(cmd[pos_user]); err != nil { 
+                     return nil, errors.New( fmt.Sprintf( "position %v is not a valid user.",pos_user )) 
+                }else {
+                    command.c_user = param_user 
+                }
+            case pos_group; 
+                if param_group, err := parse_group(cmd[pos_group]); err != nil { 
+                     return nil, errors.New( fmt.Sprintf( "position %v is not a valid group.",pos_group )) 
+                }else {
+                    command.c_group = param_group 
+                }
+
+        }
+
+    }
+ 
+    return command, nil
+ 
+} 
+ 
 // def parse_mapcopy_cmd(cmd)
 // 
 // # m,"/etc/httpd/conf" , false
