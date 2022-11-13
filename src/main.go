@@ -155,7 +155,25 @@ func main() {
     webowner := get_webowner()
     Debugln("webowner: " + webowner) 
 
-    map_copy("/root", false)
+    if command_list, err := create_command_list(Configdir, Mapcopy_csv_file); err != nil { 
+        Say("ERROR: Failed to create command list!", "bold")
+        Errorln("\t" +  err.Error()) 
+       return 
+    }else {
+        //TODO Need to decide if another ARGV is needed to proceed-on-error 
+        // or terminate of the first/any error and ignore the outstanding items in list.
+        if _, err := process_commands(command_list); err != nil { 
+            Say( "ERROR: process_commands failed!", "bold") 
+            Errorln("\t" + err.Error()) 
+            return 
+        } else {
+            Say( "Command list completed okay!")
+        }
+
+    }
+
+    //testing only...
+    //map_copy("/root", false)
 
 // ################################### now obselete ############################################
 // # all these should be in the CSV file!
@@ -182,20 +200,6 @@ func main() {
 // # simple_copy("/etc/ssl_self" , false, 'root', 'wheel' )  
 // # simple_copy("/etc/letsencrypt" , false, 'root', 'wheel' )  
 // # ##################################################################
- 
- 
-    if command_list, err := create_command_list(Configdir, Mapcopy_csv_file); err != nil { 
-        Say("ERROR: Failed to create command list!", "bold")
-       return 
-    }
-     
-    //TODO Need to decide if another ARGV is needed to proceed-on-error 
-    // or terminate of the first/any error and ignore the outstanding items in list.
-     
-    if r, err :=  process_commands(command_list); err != nil { 
-        Say( "ERROR: process_commands failed!", "bold") 
-       return 
-    } 
 
 } //end main
 
@@ -379,7 +383,7 @@ func Say(data string, opts ...string) {
         style = ""
     }
 
-    fmt.Printf("\033[%s;%sm%s: %s  \033[0m\n", style,  color, prefix,  data)
+    fmt.Printf("\033[%s;%sm%s%s\033[0m\n", style,  color, prefix,  data)
 }
 
 func Debugln(data string, opts ...string) { 
@@ -831,7 +835,7 @@ func simple_copy(path_dir string, delete_outsiders bool, user string , group str
 //and signular file transfer 
    
     source_tmp := Sourcedir + path_dir
-    Debugln(  "simple_copy: source: '" + source +  "' ", "bold")
+    Debugln(  "simple_copy: source_tmp: '" + source_tmp +  "' ", "bold")
 
     target := TEST_PREFIX + path_dir 
     Debugln( "simple_copy: target: '" + target + "' " , "bold")
@@ -851,7 +855,7 @@ func simple_copy(path_dir string, delete_outsiders bool, user string , group str
         source = source_tmp + "/" 
         //CAUTION: OpenBSD does not do -v on mkdir!!
         cmd := exec.Command("mkdir", "-p", target) 
-        if r, err := run_command(cmd); err != nil { 
+        if _, err := run_command(cmd); err != nil { 
             return false, err
         }
     } else {
@@ -861,7 +865,7 @@ func simple_copy(path_dir string, delete_outsiders bool, user string , group str
 
     logfile_part := strings.Replace(path_dir,"/", "_", -1) 
 
-    r_args := []string 
+    var r_args []string 
     if DryRun {
         r_args = append(r_args, "--dry-run") 
     }
@@ -874,14 +878,14 @@ func simple_copy(path_dir string, delete_outsiders bool, user string , group str
     }
     if user != "" && group != "" { 
         //if ANY empty -then all must be emtpy
-        r_args = append(r_args, fmt.Sprintf("--chown %v:%v", user, group) 
-    }else {
+        r_args = append(r_args, fmt.Sprintf("--chown=%v:%v", user, group) )
+    } else {
         Infoln("warning!! user or group empty!") 
     }
     r_args = append(r_args, "--backup") 
     r_args = append(r_args, fmt.Sprintf("--backup-dir=%v%v", Backupdir, path_dir) )
 
-    time_now := Time.Now().Unix()
+    time_now := time.Now().Unix()
     r_args = append( r_args, fmt.Sprintf("--log-file=%v/%v_%v.log",Logfiledir, logfile_part, time_now ))
 
     r_args = append(r_args, source ) 
@@ -903,12 +907,6 @@ func simple_copy(path_dir string, delete_outsiders bool, user string , group str
     //all good if arrived here. 
     Infoln("rsync completed okay!")
     return true, nil
-    
-    debug( "rsync call to be run: '#{rsync_call}' ")
-    result = %x( #{rsync_call} )
-    debug "simple_copy: rsync result: #{result} "
-    return true
-
 }
  
 func get_webowner() string  { 
@@ -1560,13 +1558,13 @@ func set_globals() (bool , error) {
  
 func get_command_lines(full_csv_path string) ([][]string, error) {
 
-    if _, err := os.Stat( full_csv_path ); err != nil {
+    if _ , err := os.Stat( full_csv_path ); err != nil {
         Errorln( fmt.Sprintf("full_csv_path: %v does not exist!", full_csv_path ))
         Errorln( "error: " + err.Error()) 
         return nil, err
     }
 
-    var file os.File  
+    var file *os.File  
     var file_err error
     if file, file_err = os.Open(full_csv_path) ; file_err != nil { 
         Errorln( "cannot open file: " + full_csv_path ) 
@@ -1576,7 +1574,12 @@ func get_command_lines(full_csv_path string) ([][]string, error) {
     r := csv.NewReader(file)
 	r.Comma = ','
 	r.Comment = '#'
+    r.FieldsPerRecord = -1
+    r.TrimLeadingSpace = true 
 	records, err := r.ReadAll()
+    if err != nil {
+        return nil, errors.New("(csv reader):" + err.Error())
+    }
 
     if len(records) == 0 {
       Errorln( "all empty command lines!") 
@@ -1584,24 +1587,24 @@ func get_command_lines(full_csv_path string) ([][]string, error) {
     } 
 
     for _, line := range records { 
-        fmt.Println("")
-        fmt.Print("Rec:: ") 
-        for _, col :=range line {
-            fmt.Print(col + ",") 
+        var row strings.Builder
+        for _, col := range line {
+            row.WriteString(col + ",") 
         }
+        Debugln("Row: " + row.String() ) 
     }
     
     return records, nil 
 } 
  
-func lookup_user(p string) string {
+func lookup_user(p string) (string, error) {
 //TODO Etc call
-   return p
+   return p, nil 
 }
  
-func lookup_group(p string) string {
-   //TODO Etc call
-   return p
+func lookup_group(p string) (string, error) {
+//TODO Etc call
+   return p, nil
 }
  
 func parse_path(path string) (string, error) {
@@ -1617,7 +1620,7 @@ func parse_path(path string) (string, error) {
 }
 
 func parse_bool(_p string) (string, error) {
-    p = strings.TrimSpace(_p)
+    p := strings.TrimSpace(_p)
     if !(p == "true" || p == "false"){ 
         return "", errors.New("value neither true or false") 
     }
@@ -1632,8 +1635,7 @@ func convert_bool(p string ) bool {
 }
 
 func parse_user(_p string) (string, error) { 
-    p = strings.TrimSpace(_p) 
-
+    p := strings.TrimSpace(_p) 
     if p == "" { 
         return "", errors.New("empty user given!") 
     }
@@ -1657,7 +1659,7 @@ func parse_user(_p string) (string, error) {
 
 func parse_group(_p string) (string,error) {
   
-    p = strings.TrimSpace(_p)
+    p := strings.TrimSpace(_p)
     if p == "" {
         return "", errors.New("empty group param.") 
     }
@@ -1682,56 +1684,54 @@ func parse_group(_p string) (string,error) {
 
 func parse_simple_cmd(cmd []string) (Command, error) { 
 //attempt simple_copy parse 
- 
 // s,"/var/www/html/sites/default", false, <webowner>, <webowner>
 // remember! the first element was SHIFTed , so s is gone!
-// 
-    Debugln("cmd: + cmd") 
+ 
+    Debugln( fmt.Sprintf("cmd: %v" ,  cmd) )
+
+    command := new(Command)
+    command.c_type = "simple"
  
     if len(cmd) < 4 {
-        return nil, "array size less than 4"
+        return *command, errors.New( "array size less than 4" )
     } 
+
     pos_path:=0
     pos_delete:=1
     pos_user:=2
     pos_group:=3
  
-    command := new(Command)
-    command.c_type = "simple"
-
     for i, v := range cmd { 
         
         switch i {
-            case pos_path;
-                if param_path, err := parse_path(cmd[pos_path]); err != nil { 
-                     return nil, errors.New( fmt.Sprintf( "position %v is not a valid path.",pos_path )) 
+        case pos_path:
+                if param_path, err := parse_path(v); err != nil { 
+                     return *command, errors.New( fmt.Sprintf( "position %v is not a valid path.",pos_path )) 
                 }else {
                     command.c_path = param_path 
                 }
-            case pos_delete; 
-                if param_del, err := parse_bool(cmd[pos_delete]); err != nil { 
-                     return nil, errors.New( fmt.Sprintf( "position %v is not a valid boolean.",pos_delete )) 
+            case pos_delete:
+                if param_del, err := parse_bool(v); err != nil { 
+                     return *command, errors.New( fmt.Sprintf( "position %v is not a valid boolean.",pos_delete )) 
                 }else {
                     command.c_delete = convert_bool(param_del) //convert AFTER guard. 
                 }
-            case pos_user; 
-                if param_user, err := parse_user(cmd[pos_user]); err != nil { 
-                     return nil, errors.New( fmt.Sprintf( "position %v is not a valid user.",pos_user )) 
+            case pos_user:
+                if param_user, err := parse_user(v); err != nil { 
+                     return *command, errors.New( fmt.Sprintf( "position %v is not a valid user.",pos_user )) 
                 }else {
                     command.c_user = param_user 
                 }
-            case pos_group; 
-                if param_group, err := parse_group(cmd[pos_group]); err != nil { 
-                     return nil, errors.New( fmt.Sprintf( "position %v is not a valid group.",pos_group )) 
+            case pos_group:
+                if param_group, err := parse_group(v); err != nil { 
+                     return *command, errors.New( fmt.Sprintf( "position %v is not a valid group.",pos_group )) 
                 }else {
                     command.c_group = param_group 
                 }
-
         }
-
     }
  
-    return command, nil
+    return *command, nil
  
 } 
  
@@ -1743,101 +1743,106 @@ func parse_mapcopy_cmd(cmd []string ) (Command, error) {
 
 pos_path:=0
 pos_delete:=1
-
-if len(cmd) < 2 {
-    return nil,  errors.New("array size less than 2! wrong size.") 
-} 
-
 c := new(Command) 
 c.c_type = "mapcopy" 
 
+if len(cmd) < 2 {
+    return *c,  errors.New("array size less than 2! wrong size.") 
+} 
+
+
 if p, err := parse_path(cmd[pos_path]); err != nil { 
-     return nil, errors.New( fmt.Sprintf( "position %v is not a valid path.",pos_path )) 
+     return *c, errors.New( fmt.Sprintf( "position %v is not a valid path.",pos_path )) 
 }else {
-    command.c_path = p
+    c.c_path = p
 }
 
-if p, err := parse_delete(cmd[pos_delete]); err != nil { 
-     return nil, errors.New( fmt.Sprintf( "position %v is not a valid boolean.",pos_delete )) 
+if p, err := parse_bool(cmd[pos_delete]); err != nil { 
+     return *c, errors.New( fmt.Sprintf( "position %v is not a valid boolean.",pos_delete )) 
 }else {
-    command.c_delete = convert_bool(p) //convert after guard,
+    c.c_delete = convert_bool(p) //convert after guard,
 }
  
  
-return command, nil 
+return *c, nil 
  
 }
 
 func parse_command(cmd []string ) (Command, error) {
 
-a = cmd[:1] 
-action = strings.TrimSpace(a)
+    a := cmd[0] 
+    action := strings.TrimSpace(a)
 
-if !( action == "s" || action == "m") {
-    return nil, errors.New("cannot parse action from command array") 
-}
+    var res Command //= new(Command) //blank 
 
-if action == "s" { 
-   if  command, err := parse_simple_cmd(cmd[1:]); err != nil {
-        return nil, err 
-   }else {
-        return command, nil 
-   }
-} else if action == "m" {
-    if command, err := parse_mapcopy_cmd(cmd[1:]); err != nil { 
-        return nil, err
-    } else {
-        return command, nil 
+    if !( action == "s" || action == "m") {
+        return res, errors.New("cannot parse action from command array") 
     }
-} else {
-    return nil, errors.New("Unknown action")
-} 
+
+    if action == "s" { 
+       if  command, err := parse_simple_cmd(cmd[1:]); err != nil {
+            return res, err 
+       }else {
+            return command, nil 
+       }
+    } else if action == "m" {
+        if command, err := parse_mapcopy_cmd(cmd[1:]); err != nil { 
+            return res, err
+        } else {
+            return command, nil 
+        }
+    } else {
+        return res, errors.New("Unknown action")
+    } 
  
-return command, err
+    return res, nil
  
 } 
  
  
 func create_command_list(config_dir string, command_csv_file string ) ([]Command, error)  { 
 //push good parsed commands to the array 
- 
-full_path := config_dir + "/" + command_csv_file 
-if lines, err := get_command_lines(full_path); err != nil { 
-    return nil, err
-}
 
-command_list := make([]Command) 
+    var command_list []Command 
+     
+    full_path := config_dir + "/" + command_csv_file 
+    Debugln("command csv file: " + full_path ) 
+    if lines, err := get_command_lines(full_path); err != nil { 
+        return command_list, err
+    } else { 
+        //command_list = []Command 
+        for _ , row := range lines { 
+            if command, err := parse_command( row ); err != nil { 
+                return command_list, err
+            } else {
+                command_list = append(command_list, command)
+            }
+        }
+    }
 
-for i, row := range records { 
-    if command, err := parse_command( row ); err != nil { 
-        return nil, err
-    } 
-    command_list = append(command_list, command)
-}
-
-  return command_list, nil
+    return command_list, nil
 } 
 
 func process_commands(command_list []Command ) (bool, error) {
 
     if len(command_list) == 0 { 
-        return nil, errors.New("command list size zero!") 
+        return false , errors.New("command list size zero!") 
     }
      
-    for i, c := range command_list { 
+    for _, c := range command_list { 
         if c.c_type == "simple" {
             Debugln( "COMMAND:: simple:  path: " +  c.c_path  )
-            if result , err := simple_copy(c.c_path, c.c_delete, c.c_user , c.c_group); err != nil { 
-                return nil, err
+            if _ , err := simple_copy(c.c_path, c.c_delete, c.c_user , c.c_group); err != nil { 
+                return false, err
             }
 
         } else if c.c_type == "mapcopy" {
             Debugln( "COMMAND:: mapcopy: path: " + c.c_path )
-            if result , err := map_copy(c.c_path, c.c_delete); err != nil { 
-                return nil , err 
+            if _ , err := map_copy(c.c_path, c.c_delete); err != nil { 
+                return false , err 
             }
         } else {
-            return nil, errors.New("command neither simple or mapcopy: " + c.c_type)
+            return false, errors.New("command neither simple or mapcopy: " + c.c_type)
         }
 
     }
