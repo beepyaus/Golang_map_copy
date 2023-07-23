@@ -4,3 +4,4 @@
   
 - original code a perl script i wrote for Jobi.com.au. 
 - multiple versions of the same task 
+-  Ruby, Perl, Rust, Golang
