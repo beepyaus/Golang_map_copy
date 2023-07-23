@@ -30,8 +30,8 @@ import (
 // # part 2 - this file (ruby/perl/rust version
 // #   - chown and chmod the swap/temp dir to correct ACLs etc 
 // #   - use the XML spec file for lookup , normally
-// #     on dev machine: ~/Development/Jobi/Utils/sync/assets/config/base_TREE_SPECS/spec_foo.xml
-// #     on live machine: ~/sync/assets/config/base_TREE_SPECS/spec_foo.xml
+// #     on dev machine: ~/Development/Jobi/Utils/sync/assets/config/tree_definitions/spec_foo.xml
+// #     on live machine: ~/sync/assets/config/tree_definitions/spec_foo.xml
 //       
 // #   - refer to the file-system file area normally 
 // #     on dev machine:  ~/Development/Jobi/Utils/sync/assets/config/base_{PROD,OTHER_TAG}
@@ -52,14 +52,14 @@ import (
 // #        - OO ? wrap in a class? 
 // ###############################################################################################################
 
-var Version string = "0.0.1"
+const Version string = "0.0.1"
 
 // #Hardcoded value to prefix the target destination for testing
 // #SET TO "" for the LIVE/REAL scenario testing
-var TEST_PREFIX = "/home/troy/Downloads/golang_test_mapcopy"
+const TEST_PREFIX = "/home/troy/Downloads/golang_test_mapcopy"
 //TEST_PREFIX = ""
 
-var Mapcopy_csv_file="mapcopy_commands.csv"
+const Mapcopy_csv_file="mapcopy_commands.csv"
 
 var Configdir string
 var Swapdir string 
@@ -952,7 +952,7 @@ func map_copy(path_dir string, delete_outsiders bool) (bool, error) {
     file_part := re.ReplaceAllString(path_dir,"_") 
     Debugln( "\tfile_part: '" + file_part + "' " )
 
-    file_name := fmt.Sprintf("%v/base_TREE_SPECS/spec%v.xml", Configdir, file_part)
+    file_name := fmt.Sprintf("%v/tree_definitions/spec%v.xml", Configdir, file_part)
 
     Infoln( fmt.Sprintf( "XML Spec Tree: '%v'", file_name))
 
